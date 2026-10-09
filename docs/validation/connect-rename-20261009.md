@@ -7,6 +7,8 @@
 - 归档 SHA-256：`f0c3547d5759370e4ab3fb216adbd12c9f27f1bc612432be429afc5e46cec968`。
 - 管理入口：`https://edge.trinfo.net/connect/`；旧 `/support/*` 与既有 GitHub 回调兼容。
 - 控制机：`adam@192.168.2.52`；Connect 服务账号、服务、程序、配置及状态目录已迁移到新名称。
+- 2.52 源码：`/srv/tsuite-connect/repository`；发布归档与来源记录：`/srv/tsuite-connect/releases/v0.2.2/`；`current` 指向该版本。
+- 新的页面服务与 GC timer 均 enabled/active；旧 Support unit 已移除，现场只保留 3 个 Connect unit。
 - Edge 只更新 Caddy 路由；既有客户接入与清理协议保留。详见 [改名说明](../rename-connect.md)。
 
 ## 验证证据
@@ -29,3 +31,6 @@
 - 账号首次迁移被闲置 ControlPersist 进程阻止时已恢复原服务；0.2.1 增加进程排空。
 - 0.2.2 为 HTTP 就绪检查增加有界重试；已在实际主机再次执行迁移并验证成功。
 - 回退副本仅作本机维护恢复，权限受限；临时会话私钥目录未进入备份。
+
+控制机原 `tsuite_deploy` 工作区无未提交修改，但本地 main 仍属于此前压缩前的历史。
+已保留原 main 引用，将工作区以分离 HEAD 固定到已推送的 `72eb941`，避免混合两段历史；工作区保持干净。
