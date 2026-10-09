@@ -51,12 +51,29 @@ for path in /etc/tsuite-support-console /etc/tsuite-support-control /var/lib/tsu
 		cp -a --parents "$path" "$backup/"
 	fi
 done
+# Broker reads use ControlPersist; drain only its idle SSH masters after writers stop.
+for socket in /var/lib/tsuite-support-operator/ssh-control-* /var/lib/tsuite-connect-operator/ssh-control-*; do
+	if [[ -S "$socket" ]]; then
+		sudo -n -u "$operator_user" ssh -F none -S "$socket" -O exit unused </dev/null
+	fi
+done
+for _ in {1..30}; do
+	pgrep -u "$(id -u "$operator_user")" >/dev/null || break
+	sleep 0.1
+done
+for suffix in console operator; do
+	if id "tsuite-support-$suffix" >/dev/null 2>&1; then
+		if pgrep -u "$(id -u "tsuite-support-$suffix")" >/dev/null; then
+			fail "旧账号仍有进程，尚未重命名: $suffix"
+		fi
+	fi
+done
 for suffix in console operator; do
 	old="tsuite-support-$suffix"; new="tsuite-connect-$suffix"
 	if id "$old" >/dev/null 2>&1; then
 		! id "$new" >/dev/null 2>&1 || fail "新旧账号同时存在: $suffix"
-		groupmod -n "$new" "$old"
 		usermod -l "$new" "$old"
+		if getent group "$old" >/dev/null; then groupmod -n "$new" "$old"; fi
 	fi
 done
 for old in /etc/tsuite-support-console /etc/tsuite-support-control /var/lib/tsuite-support-console \
