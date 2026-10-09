@@ -1,5 +1,6 @@
 name: Windows support client
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -8,14 +9,14 @@ on:
       - 'operator/*.ps1'
       - 'operator/*.cs'
       - 'tests/*.ps1'
-      - '.github/workflows/support-windows.yml'
+      - '.github/workflows/**'
   pull_request:
     paths:
       - 'customer/*.ps1'
       - 'operator/*.ps1'
       - 'operator/*.cs'
       - 'tests/*.ps1'
-      - '.github/workflows/support-windows.yml'
+      - '.github/workflows/**'
 permissions:
   contents: read
 jobs:
