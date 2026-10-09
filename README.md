@@ -10,6 +10,17 @@ SSH 反向隧道。客户只需执行一条由公司 CLI 生成的命令，无�
 仓库地址：[transinfosh/tsuite-support](https://github.com/transinfosh/tsuite-support)。
 首次安装见[控制服务安装](control/README.md)，升级与发布见[运维手册](docs/operations.md)，原仓库迁移边界见[拆分记录](docs/migration.md)。
 
+## 使用现有服务
+
+日常远程支持与业务部署直接使用 `192.168.2.52` 上已部署的 TSuite Support，
+入口为[支持管理页面](https://edge.trinfo.net/support/)。
+
+登录页面创建会话，将客户执行命令交给客户，在支持机执行支持端命令；
+两端操作系统可在命令页分别选择。交给 AI 时复制页面的操作说明，并在末尾补充任务。
+操作完成后关闭会话。
+
+现有环境无需再次安装。下文安装说明供新建环境与独立维护支持服务使用。
+
 ## 安全边界
 
 - 客户入口通过 Caddy HTTPS 提供 15 分钟随机地址，enrollment 仍由专用 SSH

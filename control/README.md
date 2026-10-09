@@ -1,5 +1,8 @@
 # 控制服务安装
 
+日常使用直接访问 `192.168.2.52` 上已部署的 TSuite Support：
+[支持管理页面](https://edge.trinfo.net/support/)。现有环境无需再次安装；下述步骤用于新建环境或维护支持服务。
+
 从固定版本检出本仓库；以下路径均相对于仓库根目录。不需要安装 `tsuite_deploy`。
 堡垒机及控制服务目前面向 Ubuntu/systemd；日常支持终端可为 Linux 或原生 Windows PowerShell/OpenSSH。
 
