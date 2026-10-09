@@ -1,7 +1,7 @@
 # TSuite Connect 改名与原地迁移
 
 产品与仓库由 TSuite Support / `transinfosh/tsuite-support` 改为
-TSuite Connect / `transinfosh/tsuite-connect`。当前版本为 0.2.1；已有 v0.1.0 Tag 与归档保持不变。
+TSuite Connect / `transinfosh/tsuite-connect`。当前版本为 0.2.2；已有 v0.1.0 Tag 与归档保持不变。
 
 ## 2.52 控制服务
 
@@ -58,3 +58,5 @@ sudo control/migrate-connect.sh --apply
 会话状态目录原地保留，回退不得覆盖新产生的历史或客户数据。共享路由可独立恢复其维护前备份。
 
 0.2.1 修复现场发现的 ControlPersist master 占用账号问题；账号重命名成功后才更改组名，降低失败时的中间状态。
+
+0.2.2 为页面启动健康检查增加有界重试，避免 systemd 显示 active 后 HTTP 监听尚未就绪时误报迁移失败。

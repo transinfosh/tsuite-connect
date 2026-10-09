@@ -158,7 +158,8 @@ systemctl daemon-reload
 sudo -n -u tsuite-connect-operator /usr/local/bin/tsuite-connect-console-action self-test </dev/null >/dev/null
 systemctl enable --now tsuite-connect-console.service tsuite-connect-operator-gc.timer
 systemctl is-active --quiet tsuite-connect-console.service
-curl --fail --silent --show-error -o /dev/null http://127.0.0.1:8765/operator-client
+curl --fail --silent --show-error --retry 20 --retry-connrefused --retry-delay 1 --retry-max-time 30 --max-time 3 \
+	-o /dev/null http://127.0.0.1:8765/operator-client
 python3 - <<'PY_CLEANUP'
 from pathlib import Path
 import shutil
