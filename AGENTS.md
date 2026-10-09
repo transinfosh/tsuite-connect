@@ -7,5 +7,5 @@
 - 使用隔离临时目录及本机独立 sshd 做验证。生产会话、系统账号、密钥和配置只能通过明确的维护任务修改。
 - 保留已安装的 `/etc/tsuite-support*`、`/var/lib/tsuite-support*`、systemd unit 和命令路径；源码目录拆分不构成数据迁移。
 - 私钥、OAuth Secret、TOTP 密钥、一次性接入凭据不提交、不输出到普通日志。不关闭 Host Key 校验，不扩大 Web 服务的 sudo 权限。
-- 发布使用不可移动的 `v<version>` tag，版本与 VERSION 一致；发布源码归档及 SHA-256。下游固定版本和摘要，不跟随 main。
+- 发布使用不可移动的 `v<version>` tag，版本与 VERSION 一致；发布源码归档及 SHA-256。支持服务由本仓库独立升级，业务部署直接使用现有服务。
 - 完成条件：相关 Python/Shell 检查通过；Windows 改动还需 Windows CI 通过；文档如实说明验证边界。线上维护需核验服务与 HTTPS 入口。

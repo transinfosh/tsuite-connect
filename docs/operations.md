@@ -41,7 +41,8 @@ Linux 上的 PowerShell 验证不能替代 Windows ACL 验证。
 VERSION 为 `X.Y.Z`；验证通过后提交、创建同版本不可移动 tag `vX.Y.Z`。
 使用 `git archive --format=tar.gz --prefix=tsuite-support-vX.Y.Z/ vX.Y.Z` 生成源码归档，
 通过 `sha256sum` 生成校验文件，将两者发布到同名 GitHub Release。
-下游 `tsuite_deploy` 只更新 `control-node/support-release.env` 的版本与 SHA-256，安装入口验证摘要后运行。
+业务部署使用已部署在 `192.168.2.52` 的支持服务，入口为 `https://edge.trinfo.net/support/`。
+`tsuite_deploy` 不下载、不锁定版本、不安装支持工具；支持服务的发布和升级由本仓库独立维护。
 已发布 tag/归档不覆盖；修复发布新版本。独立仓库不从下游加载运行时源码。
 
 ## 历史记录

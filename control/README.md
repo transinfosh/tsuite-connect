@@ -70,5 +70,7 @@ handle_path /support/* {
 Web 只允许 create/set-platform/show/list/close/claim；broker 用户持有私钥，Web 用户不可读取。
 只有运维用户可执行 ssh/run/force-close。prepare 安装器沿用历史 sudoers 文件名
 `/etc/sudoers.d/tsuite-deploy-operator`，防止原地升级重复定义别名；该文件名不代表代码依赖。
-新安装仅授权重启支持页面；下游兼容入口显式传入 `--deployment-service-permissions` 时才保留
-既有部署机 nginx/frpc/github-egress 的精确重启权限。
+新安装仅授权重启支持页面。维护既有 2.52 共享部署机时，可在本仓库直接运行 prepare 安装器，
+显式传入 `--deployment-service-permissions`，保留 nginx/frpc/github-egress 的精确重启权限；
+安装页面时显式传入 `--https-proxy http://127.0.0.1:18080` 以沿用其出站代理。
+日常业务部署直接使用现有服务，无需执行这些安装步骤。
