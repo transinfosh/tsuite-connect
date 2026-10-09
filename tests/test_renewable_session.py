@@ -166,7 +166,7 @@ class RelayTest(unittest.TestCase):
                 runner = root / 'runner.py'
                 helper = root / 'helper.py'
                 helper.write_text(f"with open({str(events)!r}, 'a') as output: output.write('input\\n')\n")
-                module = ROOT / 'operator/tsuite_support_activity.py'
+                module = ROOT / 'operator/tsuite_connect_activity.py'
                 runner.write_text(f"""import importlib.util, sys
 spec = importlib.util.spec_from_file_location('relay', {str(module)!r})
 relay = importlib.util.module_from_spec(spec)
@@ -186,7 +186,7 @@ sys.exit(relay.connect(command, [sys.executable, {str(helper)!r}], 'linux', '012
             helper = root / 'helper.py'
             helper.write_text(f"import time; time.sleep(0.2)\nwith open({str(events)!r}, 'a') as output: output.write('input\\n')\n")
             runner = root / 'runner.py'
-            module = ROOT / 'operator/tsuite_support_activity.py'
+            module = ROOT / 'operator/tsuite_connect_activity.py'
             runner.write_text(f"""import importlib.util, sys
 spec = importlib.util.spec_from_file_location('relay', {str(module)!r})
 relay = importlib.util.module_from_spec(spec)
@@ -201,7 +201,7 @@ sys.exit(relay.connect(['/bin/true'], [sys.executable, {str(helper)!r}], 'linux'
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             runner = root / 'runner.py'
-            module = ROOT / 'operator/tsuite_support_activity.py'
+            module = ROOT / 'operator/tsuite_connect_activity.py'
             runner.write_text(f'''import importlib.util, sys
 spec = importlib.util.spec_from_file_location('relay', {str(module)!r})
 relay = importlib.util.module_from_spec(spec)

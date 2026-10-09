@@ -34,8 +34,8 @@ SESSION_TTL_SECONDS = 8 * 60 * 60
 OAUTH_STATE_TTL_SECONDS = 10 * 60
 LOCAL_LOGIN_TTL_SECONDS = 5 * 60
 LOCAL_INVITE_TTL_SECONDS = 30 * 60
-ACTION = "/usr/local/bin/tsuite-support-console-action"
-BROKER_USER = "tsuite-support-operator"
+ACTION = "/usr/local/bin/tsuite-connect-console-action"
+BROKER_USER = "tsuite-connect-operator"
 ACTIVE_STATUSES = {"issued", "enrolled", "revoking"}
 CLOSABLE_STATUSES = {"issued", "enrolled"}
 STATUS_PRESENTATION = {
@@ -92,6 +92,7 @@ class Settings:
 	local_admin_user: str | None = None
 	local_password_hash: str | None = None
 	local_totp_secret: str | None = None
+	github_callback_url: str | None = None
 
 	@classmethod
 	def load(cls, path: pathlib.Path) -> "Settings":
@@ -100,6 +101,7 @@ class Settings:
 		if not isinstance(value, dict):
 			raise ConsoleError("控制台配置必须是 JSON 对象")
 		settings = cls(
+			github_callback_url=value.get("github_callback_url"),
 			client_id=str(value["github_client_id"]),
 			client_secret=str(value["github_client_secret"]),
 			allowed_org=str(value["github_allowed_org"]),
@@ -119,6 +121,10 @@ class Settings:
 		parsed = urllib.parse.urlsplit(self.public_url)
 		if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
 			raise ConsoleError("public_url 必须是不带参数的 HTTPS 地址")
+		if self.github_callback_url:
+			callback = urllib.parse.urlsplit(self.github_callback_url)
+			if callback.scheme != "https" or callback.netloc != parsed.netloc or callback.query or callback.fragment or not callback.path.endswith("/auth/github/callback"):
+				raise ConsoleError("GitHub 回调必须是同域的 HTTPS callback 地址")
 		if not self.client_id or not self.client_secret:
 			raise ConsoleError("GitHub OAuth Client ID/Secret 不能为空")
 		if not self.allowed_org or "/" in self.allowed_org:
@@ -142,7 +148,7 @@ class Settings:
 
 	@property
 	def callback_url(self) -> str:
-		return f"{self.public_url}/auth/github/callback"
+		return self.github_callback_url or f"{self.public_url}/auth/github/callback"
 
 
 class Store:
@@ -379,7 +385,7 @@ def github_json(request: urllib.request.Request, body: dict[str, str] | None = N
 		request.data = urllib.parse.urlencode(body).encode()
 		request.add_header("Content-Type", "application/x-www-form-urlencoded")
 	request.add_header("Accept", "application/json")
-	request.add_header("User-Agent", "tsuite-support-console")
+	request.add_header("User-Agent", "tsuite-connect-console")
 	try:
 		with urllib.request.urlopen(request, timeout=10) as response:
 			value = json.loads(response.read().decode())
@@ -485,9 +491,9 @@ def manager(*arguments: str, input_text: str | None = None) -> str:
 			check=False, capture_output=True, text=True, timeout=30, input=input_text,
 		)
 	except (OSError, subprocess.TimeoutExpired) as error:
-		raise ConsoleError("支持会话服务暂时不可用") from error
+		raise ConsoleError("远程会话服务暂时不可用") from error
 	if result.returncode:
-		raise ConsoleError("支持会话操作失败，请稍后重试或查看堡垒机服务日志")
+		raise ConsoleError("远程会话操作失败，请稍后重试或查看堡垒机服务日志")
 	return result.stdout
 
 
@@ -552,15 +558,15 @@ def login_content(local_enabled: bool = False, error: str = "") -> str:
 	local_login = ""
 	if local_enabled:
 		error_html = f'<p class="login-error" role="alert">{html.escape(error)}</p>' if error else ""
-		local_login = error_html + """<form class="login-form" method="post" action="/support/login/local">
+		local_login = error_html + """<form class="login-form" method="post" action="/connect/login/local">
 <label>账号<input name="username" required autofocus autocomplete="username"></label>
 <label>密码<input name="password" type="password" required autocomplete="current-password"></label>
 <button class="primary">继续</button></form>"""
 	content = """<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
-<h1 id="login-title">远程支持会话</h1>
+<h1 id="login-title">远程远程会话</h1>
 <p class="login-description">登录支持工作台，安全地创建和管理临时远程会话。</p>
 {local_login}<div class="login-divider"><span>其他登录方式</span></div>
-<div class="social-login"><a class="github-login" href="/support/login" aria-label="使用 GitHub 登录" title="使用 GitHub 登录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.776.418-1.305.76-1.605-2.665-.305-5.467-1.333-5.467-5.93 0-1.31.467-2.382 1.235-3.222-.124-.303-.535-1.523.117-3.176 0 0 1.008-.322 3.3 1.23A11.5 11.5 0 0 1 12 6.3c1.02.005 2.047.138 3.006.404 2.29-1.552 3.296-1.23 3.296-1.23.654 1.653.243 2.873.12 3.176.77.84 1.233 1.912 1.233 3.222 0 4.61-2.807 5.622-5.48 5.92.43.37.814 1.102.814 2.222 0 1.606-.015 2.896-.015 3.29 0 .32.216.694.825.576C20.565 22.296 24 17.797 24 12.5 24 5.87 18.627.5 12 .5Z"/></svg></a></div>
+<div class="social-login"><a class="github-login" href="/connect/login" aria-label="使用 GitHub 登录" title="使用 GitHub 登录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.776.418-1.305.76-1.605-2.665-.305-5.467-1.333-5.467-5.93 0-1.31.467-2.382 1.235-3.222-.124-.303-.535-1.523.117-3.176 0 0 1.008-.322 3.3 1.23A11.5 11.5 0 0 1 12 6.3c1.02.005 2.047.138 3.006.404 2.29-1.552 3.296-1.23 3.296-1.23.654 1.653.243 2.873.12 3.176.77.84 1.233 1.912 1.233 3.222 0 4.61-2.807 5.622-5.48 5.92.43.37.814 1.102.814 2.222 0 1.606-.015 2.896-.015 3.29 0 .32.216.694.825.576C20.565 22.296 24 17.797 24 12.5 24 5.87 18.627.5 12 .5Z"/></svg></a></div>
 <p class="login-note">GitHub 登录仅作为备用方式</p>""".replace("{local_login}", local_login)
 	return login_layout(content)
 
@@ -569,8 +575,8 @@ def totp_content(error: str = "") -> str:
 	error_html = f'<p class="login-error" role="alert">{html.escape(error)}</p>' if error else ""
 	content = """<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
 <h1 id="login-title">验证身份</h1><p class="login-description">账号密码已通过，请输入验证器中显示的 6 位动态验证码。</p>
-{error}<form class="login-form" method="post" action="/support/login/local/totp"><label>动态验证码<input class="otp-input" name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus autocomplete="one-time-code"></label><button class="primary">确认登录</button></form>
-<a class="login-back" href="/support/">返回重新登录</a>""".replace("{error}", error_html)
+{error}<form class="login-form" method="post" action="/connect/login/local/totp"><label>动态验证码<input class="otp-input" name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus autocomplete="one-time-code"></label><button class="primary">确认登录</button></form>
+<a class="login-back" href="/connect/">返回重新登录</a>""".replace("{error}", error_html)
 	return login_layout(content)
 
 
@@ -578,7 +584,7 @@ def invite_password_content(token: str, username: str, error: str = "") -> str:
 	error_html = f'<p class="login-error" role="alert">{html.escape(error)}</p>' if error else ""
 	content = f"""<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
 <h1>设置本地账号</h1><p class="login-description">为 <strong>{html.escape(username)}</strong> 设置登录密码，下一步绑定动态验证码。</p>
-{error_html}<form class="login-form" method="post" action="/support/invite/password">
+{error_html}<form class="login-form" method="post" action="/connect/invite/password">
 <input type="hidden" name="token" value="{html.escape(token)}">
 <label>密码<input name="password" type="password" minlength="16" required autocomplete="new-password"></label>
 <label>确认密码<input name="confirm_password" type="password" minlength="16" required autocomplete="new-password"></label>
@@ -595,7 +601,7 @@ def invite_totp_content(token: str, username: str, secret: str, error: str = "")
 {error_html}<div class="totp-qr"><img src="{qr_data_uri}" alt="TSuite 动态验证码绑定二维码" width="200" height="200"></div>
 <details class="totp-fallback"><summary>无法扫码？使用其他绑定方式</summary><div class="secret">{html.escape(secret)}</div>
 <p><a class="button" href="{html.escape(uri)}">在本机验证器中打开</a></p></details>
-<form class="login-form" method="post" action="/support/invite/totp"><input type="hidden" name="token" value="{html.escape(token)}">
+<form class="login-form" method="post" action="/connect/invite/totp"><input type="hidden" name="token" value="{html.escape(token)}">
 <label>动态验证码<input class="otp-input" name="totp" inputmode="numeric" pattern="[0-9]{{6}}" maxlength="6" required autofocus autocomplete="one-time-code"></label>
 <button class="primary">完成绑定</button></form>"""
 	return login_layout(content)
@@ -604,7 +610,7 @@ def invite_totp_content(token: str, username: str, secret: str, error: str = "")
 def page(title: str, content: str) -> bytes:
 	return f"""<!doctype html>
 <html lang=\"zh-CN\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
-<title>{html.escape(title)} · TSuite Support</title>
+<title>{html.escape(title)} · TSuite Connect</title>
 <style>
 *{{box-sizing:border-box}} body{{max-width:1080px;margin:0 auto;padding:36px 24px 64px;color:#17212b;font:15px system-ui,-apple-system,\"Segoe UI\",sans-serif;background:#f5f7fa}}
 header{{display:flex;justify-content:space-between;align-items:center;padding:0 0 24px}} h1{{margin:0;font-size:26px;letter-spacing:-.02em}} h2,h3{{margin-top:0}} h2{{font-size:19px}} h3{{font-size:17px}}
@@ -626,7 +632,7 @@ async function loadSessionData() {{
 	if (!summary || !groups) return;
 	groups.setAttribute("aria-busy", "true");
 	try {{
-		const response = await fetch("/support/sessions", {{
+		const response = await fetch("/connect/sessions", {{
 			credentials: "same-origin",
 			headers: {{"Accept": "application/json"}},
 		}});
@@ -689,11 +695,11 @@ def operator_ai_instructions(
 	operator_label = "Windows（PowerShell）" if operator_platform == "windows" else "Linux（Shell）"
 	if operator_platform == "windows":
 		first_command = command + " -Command 'hostname'"
-		resume = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<工具输出的 support.ps1 完整路径>" -Mode Resume -Command '
+		resume = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<工具输出的 connect.ps1 完整路径>" -Mode Resume -Command '
 		exit_check = "检查输出和退出码；首次接入检查 $LASTEXITCODE。"
 	else:
 		first_command = command + " --command 'hostname'"
-		resume = 'python3 "<工具输出的 support.py 完整路径>" --resume '
+		resume = 'python3 "<工具输出的 connect.py 完整路径>" --resume '
 		exit_check = "检查输出和退出码。"
 	remote_shell = "PowerShell" if customer_platform == "windows" else "Linux Shell"
 	return (
@@ -737,12 +743,12 @@ def configured_session_content(created: dict[str, Any], csrf: str, customer: str
 		return (f'<button type="submit" class="os-icon-button" name="{field}" value="{value}" '
 			f'title="{label}" aria-label="切换为{label}" aria-pressed="{pressed}" data-os-icon="{icon_name}">{icon}'
 			f'<span class="os-button-label">{visible_label}</span></button>')
-	operator_selector = f'''<form class="system-switcher" method="post" action="/support/session/{session_id}/platform">
+	operator_selector = f'''<form class="system-switcher" method="post" action="/connect/session/{session_id}/platform">
 {hidden}<input type="hidden" name="platform" value="{html.escape(platform)}">
 {os_button("operator_platform", "linux", "Linux 支持机（Shell）", linux_icon, operator_platform == "linux")}
 {os_button("operator_platform", "windows", "Windows 支持机（PowerShell / OpenSSH）", windows_icon, operator_platform == "windows")}
 </form>'''
-	customer_selector = f'''<form class="system-switcher" method="post" action="/support/session/{session_id}/platform">
+	customer_selector = f'''<form class="system-switcher" method="post" action="/connect/session/{session_id}/platform">
 {hidden}<input type="hidden" name="operator_platform" value="{html.escape(operator_platform)}">
 {os_button("platform", "linux", "Linux 被控机（客户执行命令）", linux_icon, platform == "linux")}
 {os_button("platform", "windows", "Windows 被控机（客户执行命令）", windows_icon, platform == "windows")}
@@ -752,7 +758,7 @@ def configured_session_content(created: dict[str, Any], csrf: str, customer: str
 	ai_text = operator_ai_instructions(customer, purpose, str(created["id"]), operator_platform, platform, command)
 	ai_section = '<div class="secret-section"><div class="secret-heading"><h2>交给 AI 的操作说明</h2><button type="button" class="copy-button" data-copy-target="ai-instructions">复制</button></div><div id="ai-instructions" class="secret">' + html.escape(ai_text) + '</div><p class="muted">复制给 AI，在末尾补充操作任务。含一次性授权，请勿公开分享。</p></div>'
 	customer_section = f'''<div class="secret-section"><div class="secret-heading"><h2>客户执行命令（{customer_title}）</h2><div class="heading-actions">{customer_selector}<button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div></div><div id="customer-command" class="secret">{html.escape(str(created.get("customer_command", "")))}</div></div>'''
-	return f'''<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{session_id}</code>。客户命令默认按 Linux 生成；使用各命令标题旁的系统选择器更新对应命令。被控机接入前可切换系统。</p>
+	return f'''<header><h1>远程会话已创建</h1><a href="/connect/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{session_id}</code>。客户命令默认按 Linux 生成；使用各命令标题旁的系统选择器更新对应命令。被控机接入前可切换系统。</p>
 {customer_section}{operator_section}{ai_section}<p class="muted">请通过安全渠道发送客户命令；命令中的链接就是接入凭据，默认 15 分钟有效，无需另输会话码。</p></section>'''
 
 
@@ -788,7 +794,7 @@ class Application:
 		return self.response(start_response, HTTPStatus.SEE_OTHER, b"", [("Location", location), *headers])
 
 	def require_session(self, environ: dict[str, Any]) -> tuple[str | None, sqlite3.Row | None]:
-		session_id = parse_cookie(environ.get("HTTP_COOKIE"), "tsuite_support_session")
+		session_id = parse_cookie(environ.get("HTTP_COOKIE"), "tsuite_connect_session")
 		return session_id, self.store.session(session_id)
 
 	def session_fragments(self, session: sqlite3.Row) -> tuple[str, str]:
@@ -821,16 +827,16 @@ class Application:
 				sessions, key=lambda item: item[1] not in ACTIVE_STATUSES
 			):
 				escaped_id = html.escape(support_id)
-				actions = [f'<a href="/support/session/{escaped_id}">查看详情</a>']
+				actions = [f'<a href="/connect/session/{escaped_id}">查看详情</a>']
 				if status in CLOSABLE_STATUSES:
 					actions.append(
-						f'<form method="post" action="/support/session/{escaped_id}/close" '
-						'onsubmit="return confirm(\'确定关闭这个支持会话吗？系统会先调度客户侧清理，再撤销连接。\')">'
+						f'<form method="post" action="/connect/session/{escaped_id}/close" '
+						'onsubmit="return confirm(\'确定关闭这个远程会话吗？系统会先调度客户侧清理，再撤销连接。\')">'
 						f'<input type="hidden" name="csrf" value="{html.escape(str(session["csrf"]))}">'
 						'<button type="submit" class="danger compact">关闭会话</button></form>'
 					)
 				rows.append(
-					f'<tr><td><a class="session-id" href="/support/session/{escaped_id}">{escaped_id}</a></td>'
+					f'<tr><td><a class="session-id" href="/connect/session/{escaped_id}">{escaped_id}</a></td>'
 					f'<td>{status_badge(status)}</td>'
 					f'<td><code>{html.escape(port)}</code></td>'
 					f'<td><div class="inline-actions">{"".join(actions)}</div></td></tr>'
@@ -845,7 +851,7 @@ class Application:
 				'<th>会话 ID</th><th>状态</th><th>回环端口</th><th>操作</th>'
 				f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div></details>'
 			)
-		groups = "".join(group_cards) or '<div class="card empty">当前没有活动支持会话</div>'
+		groups = "".join(group_cards) or '<div class="card empty">当前没有活动远程会话</div>'
 		summary = (
 			f'<span><strong>{len(grouped)}</strong> 个客户环境</span>'
 			f'<span><strong>{active_total}</strong> 个活动会话</span>'
@@ -863,14 +869,14 @@ class Application:
 			disabled = " disabled" if str(user["username"]) == str(session["login"]) else ""
 			rows.append(
 				f'<tr><td><strong>{username}</strong><br><span class="muted">{html.escape(str(user["display_name"]))}</span></td>'
-				f'<td>{role}</td><td>{status}</td><td><div class="inline-actions"><form method="post" action="/support/users/{username}/reset-totp">'
+				f'<td>{role}</td><td>{status}</td><td><div class="inline-actions"><form method="post" action="/connect/users/{username}/reset-totp">'
 				f'<input type="hidden" name="csrf" value="{html.escape(str(session["csrf"]))}">'
-				f'<button class="compact">重绑 TOTP</button></form><form method="post" action="/support/users/{username}/toggle">'
+				f'<button class="compact">重绑 TOTP</button></form><form method="post" action="/connect/users/{username}/toggle">'
 				f'<input type="hidden" name="csrf" value="{html.escape(str(session["csrf"]))}">'
 				f'<button class="compact"{disabled}>{action}</button></form></div></td></tr>'
 			)
-		content = f"""<header><div><h1>本地用户</h1><p class="muted">通过一次性邀请完成密码设置和 TOTP 绑定。</p></div><a class="button" href="/support/">返回工作台</a></header>
-<section class="card"><h2>邀请新用户</h2><form class="create-form" method="post" action="/support/users/invite">
+		content = f"""<header><div><h1>本地用户</h1><p class="muted">通过一次性邀请完成密码设置和 TOTP 绑定。</p></div><a class="button" href="/connect/">返回工作台</a></header>
+<section class="card"><h2>邀请新用户</h2><form class="create-form" method="post" action="/connect/users/invite">
 <input type="hidden" name="csrf" value="{html.escape(str(session['csrf']))}">
 <label>用户名<input name="username" required pattern="[A-Za-z0-9_-]{{3,64}}" autocomplete="off"></label>
 <label>显示名称<input name="display_name" required maxlength="80" autocomplete="off"></label>
@@ -880,10 +886,10 @@ class Application:
 		return self.response(start_response, HTTPStatus.OK, page("本地用户", content))
 
 	def dashboard(self, start_response: Callable[..., Any], session: sqlite3.Row) -> list[bytes]:
-		users_link = '<a class="button" href="/support/users">用户管理</a>' if bool(session["is_admin"]) else ""
-		content = f"""<header><h1>TSuite 支持管理</h1><div class=\"detail-actions\">{users_link}<form method=\"post\" action=\"/support/logout\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><button>退出 {html.escape(str(session['login']))}</button></form></div></header>
-<section class=\"card\"><h2>新建支持会话</h2><p class=\"muted\">为同一台客户机器使用固定的环境标识，例如 <code>dtaut-srm-prod-01</code>。每次连接都会自动生成新的完整会话 ID。</p>
-<form class=\"create-form\" method=\"post\" action=\"/support/session\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><label>客户环境标识<input name=\"customer\" required autocomplete=\"off\" placeholder=\"例如 dtaut-srm-prod-01\" pattern=\"[a-z0-9][a-z0-9-]{{0,47}}\"></label><label>支持用途（可选）<input name=\"purpose\" maxlength=\"200\" autocomplete=\"off\" placeholder=\"例如升级 SRM 至 0.1.10\"></label><button class=\"primary\">创建会话</button></form>
+		users_link = '<a class="button" href="/connect/users">用户管理</a>' if bool(session["is_admin"]) else ""
+		content = f"""<header><h1>TSuite Connect 远程管理</h1><div class=\"detail-actions\">{users_link}<form method=\"post\" action=\"/connect/logout\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><button>退出 {html.escape(str(session['login']))}</button></form></div></header>
+<section class=\"card\"><h2>新建远程会话</h2><p class=\"muted\">为同一台客户机器使用固定的环境标识，例如 <code>dtaut-srm-prod-01</code>。每次连接都会自动生成新的完整会话 ID。</p>
+<form class=\"create-form\" method=\"post\" action=\"/connect/session\"><input type=\"hidden\" name=\"csrf\" value=\"{html.escape(str(session['csrf']))}\"><label>客户环境标识<input name=\"customer\" required autocomplete=\"off\" placeholder=\"例如 dtaut-srm-prod-01\" pattern=\"[a-z0-9][a-z0-9-]{{0,47}}\"></label><label>支持用途（可选）<input name=\"purpose\" maxlength=\"200\" autocomplete=\"off\" placeholder=\"例如升级 SRM 至 0.1.10\"></label><button class=\"primary\">创建会话</button></form>
 <div id=\"session-summary\" class=\"summary\" aria-live=\"polite\"><span class=\"loading-label\">正在读取会话数据…</span></div></section>
 <section><h2>客户环境与会话</h2><div id=\"session-groups\" class=\"group-list\" aria-live=\"polite\" aria-busy=\"true\"><div class=\"card loading\"><span class=\"spinner\"></span><span>正在加载会话列表…</span></div></div></section>"""
 		return self.response(start_response, HTTPStatus.OK, page("支持管理", content))
@@ -895,10 +901,10 @@ class Application:
 		try:
 			if path == "/operator-client.ps1" and method == "GET":
 				root = pathlib.Path(__file__).resolve().parent
-				if not (root / "tsuite_support_windows.ps1").is_file():
+				if not (root / "tsuite_connect_windows.ps1").is_file():
 					root = root.parent / "operator"
-				source = base64.b64encode((root / "tsuite_support_windows.ps1").read_bytes()).decode("ascii")
-				relay = base64.b64encode((root / "tsuite_support_windows_relay.cs").read_bytes()).decode("ascii")
+				source = base64.b64encode((root / "tsuite_connect_windows.ps1").read_bytes()).decode("ascii")
+				relay = base64.b64encode((root / "tsuite_connect_windows_relay.cs").read_bytes()).decode("ascii")
 				body = (
 					"param([string]$Mode = 'Claim', [string]$GrantJson, [string]$Command)\n"
 					+ "$script:ClientSource = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + source + "'))\n"
@@ -909,10 +915,10 @@ class Application:
 				return [body]
 			if path == "/operator-client" and method == "GET":
 				root = pathlib.Path(__file__).resolve().parent
-				if not (root / "tsuite_support_portable.py").is_file():
+				if not (root / "tsuite_connect_portable.py").is_file():
 					root = root.parent / "operator"
-				source = (root / "tsuite_support_portable.py").read_text(encoding="utf-8")
-				activity = (root / "tsuite_support_activity.py").read_text(encoding="utf-8")
+				source = (root / "tsuite_connect_portable.py").read_text(encoding="utf-8")
+				activity = (root / "tsuite_connect_activity.py").read_text(encoding="utf-8")
 				body = ("CLIENT_SOURCE = " + repr(source) + "\nACTIVITY_SOURCE = " + repr(activity) + "\n" + source).encode()
 				start_response("200 OK", [("Content-Type", "text/plain; charset=utf-8"), ("Content-Length", str(len(body))), ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff")])
 				return [body]
@@ -926,7 +932,7 @@ class Application:
 			if path == "/login" and method == "GET":
 				state, verifier = self.store.new_oauth_state()
 				query = urllib.parse.urlencode({"client_id": self.settings.client_id, "redirect_uri": self.settings.callback_url, "scope": "read:org", "state": state, "code_challenge": code_challenge(verifier), "code_challenge_method": "S256"})
-				oauth_cookie = f"tsuite_support_oauth={state}; Path=/support/auth/github/callback; Secure; HttpOnly; SameSite=Lax; Max-Age={OAUTH_STATE_TTL_SECONDS}"
+				oauth_cookie = f"tsuite_connect_oauth={state}; Path={urllib.parse.urlsplit(self.settings.callback_url).path}; Secure; HttpOnly; SameSite=Lax; Max-Age={OAUTH_STATE_TTL_SECONDS}"
 				return self.redirect(start_response, f"https://github.com/login/oauth/authorize?{query}", [("Set-Cookie", oauth_cookie)])
 			if path == "/login/local" and method == "POST":
 				form = form_data(environ)
@@ -940,14 +946,14 @@ class Application:
 						page("登录", login_content(True, "账号或密码不正确")),
 					)
 				challenge_id = self.store.new_local_login_challenge(str(user["username"]))
-				cookie = f"tsuite_support_local={challenge_id}; Path=/support/login/local/totp; Secure; HttpOnly; SameSite=Strict; Max-Age={LOCAL_LOGIN_TTL_SECONDS}"
+				cookie = f"tsuite_connect_local={challenge_id}; Path=/connect/login/local/totp; Secure; HttpOnly; SameSite=Strict; Max-Age={LOCAL_LOGIN_TTL_SECONDS}"
 				return self.response(start_response, HTTPStatus.OK, page("身份验证", totp_content()), [("Set-Cookie", cookie)])
 			if path == "/login/local/totp" and method == "POST":
-				challenge_id = parse_cookie(environ.get("HTTP_COOKIE"), "tsuite_support_local")
+				challenge_id = parse_cookie(environ.get("HTTP_COOKIE"), "tsuite_connect_local")
 				challenge = self.store.local_login_challenge(challenge_id)
 				if challenge is None or not challenge_id:
-					clear = "tsuite_support_local=; Path=/support/login/local/totp; Secure; HttpOnly; SameSite=Strict; Max-Age=0"
-					return self.redirect(start_response, "/support/", [("Set-Cookie", clear)])
+					clear = "tsuite_connect_local=; Path=/connect/login/local/totp; Secure; HttpOnly; SameSite=Strict; Max-Age=0"
+					return self.redirect(start_response, "/connect/", [("Set-Cookie", clear)])
 				form = form_data(environ)
 				user = self.store.local_user(str(challenge["login"]))
 				if user is None or not bool(user["enabled"]) or not verify_totp(str(user["totp_secret"]), form.get("totp", "")):
@@ -958,13 +964,13 @@ class Application:
 					)
 				self.store.consume_local_login_challenge(challenge_id)
 				session_id, _ = self.store.new_session(str(user["username"]), str(user["display_name"]), bool(user["is_admin"]), "local")
-				session_cookie = f"tsuite_support_session={session_id}; Path=/support; Secure; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}"
-				clear = "tsuite_support_local=; Path=/support/login/local/totp; Secure; HttpOnly; SameSite=Strict; Max-Age=0"
-				return self.redirect(start_response, "/support/", [("Set-Cookie", session_cookie), ("Set-Cookie", clear)])
+				session_cookie = f"tsuite_connect_session={session_id}; Path=/connect; Secure; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}"
+				clear = "tsuite_connect_local=; Path=/connect/login/local/totp; Secure; HttpOnly; SameSite=Strict; Max-Age=0"
+				return self.redirect(start_response, "/connect/", [("Set-Cookie", session_cookie), ("Set-Cookie", clear)])
 			if path == "/auth/github/callback" and method == "GET":
 				query = urllib.parse.parse_qs(environ.get("QUERY_STRING", ""))
 				state, code = query.get("state", [""])[-1], query.get("code", [""])[-1]
-				browser_state = parse_cookie(environ.get("HTTP_COOKIE"), "tsuite_support_oauth")
+				browser_state = parse_cookie(environ.get("HTTP_COOKIE"), "tsuite_connect_oauth")
 				if not browser_state or not secrets.compare_digest(browser_state, state):
 					raise ConsoleError("GitHub 登录请求与当前浏览器不匹配")
 				verifier = self.store.consume_oauth_state(state)
@@ -972,9 +978,9 @@ class Application:
 					raise ConsoleError("GitHub 登录状态已失效，请重新登录")
 				login, name = github_identity(self.settings, code, verifier)
 				session_id, _ = self.store.new_session(login, name, True, "github")
-				cookie = f"tsuite_support_session={session_id}; Path=/support; Secure; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}"
-				clear_oauth = "tsuite_support_oauth=; Path=/support/auth/github/callback; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
-				return self.redirect(start_response, "/support/", [("Set-Cookie", cookie), ("Set-Cookie", clear_oauth)])
+				cookie = f"tsuite_connect_session={session_id}; Path=/connect; Secure; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}"
+				clear_oauth = f"tsuite_connect_oauth=; Path={urllib.parse.urlsplit(self.settings.callback_url).path}; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
+				return self.redirect(start_response, "/connect/", [("Set-Cookie", cookie), ("Set-Cookie", clear_oauth)])
 			if path == "/invite" and method == "GET":
 				token = urllib.parse.parse_qs(environ.get("QUERY_STRING", "")).get("token", [""])[-1]
 				invite = self.store.local_user_invite(token)
@@ -1005,7 +1011,7 @@ class Application:
 					self.store.fail_local_user_invite(token)
 					return self.response(start_response, HTTPStatus.BAD_REQUEST, page("绑定动态验证码", invite_totp_content(token, str(invite["username"]), str(invite["totp_secret"]), "动态验证码不正确，请检查手机时间后重试")))
 				self.store.activate_local_user_invite(token)
-				content = '<section class="card" style="max-width:520px;margin:80px auto;text-align:center"><h1>账号已启用</h1><p>密码和动态验证码绑定成功，现在可以登录支持工作台。</p><a class="button" href="/support/">前往登录</a></section>'
+				content = '<section class="card" style="max-width:520px;margin:80px auto;text-align:center"><h1>账号已启用</h1><p>密码和动态验证码绑定成功，现在可以登录支持工作台。</p><a class="button" href="/connect/">前往登录</a></section>'
 				return self.response(start_response, HTTPStatus.OK, page("账号已启用", content))
 			session_id, session = self.require_session(environ)
 			if path == "/logout" and method == "POST":
@@ -1013,7 +1019,7 @@ class Application:
 				if session is None or not secrets.compare_digest(form.get("csrf", ""), str(session["csrf"])):
 					raise ConsoleError("请求校验失败，请刷新页面后重试")
 				self.store.delete_session(session_id)
-				return self.redirect(start_response, "/support/", [("Set-Cookie", "tsuite_support_session=; Path=/support; Secure; HttpOnly; SameSite=Lax; Max-Age=0")])
+				return self.redirect(start_response, "/connect/", [("Set-Cookie", "tsuite_connect_session=; Path=/connect; Secure; HttpOnly; SameSite=Lax; Max-Age=0")])
 			if session is None:
 				return self.response(start_response, HTTPStatus.UNAUTHORIZED, page("登录", login_content(bool(self.settings.local_admin_user))))
 			if path == "/users" and method == "GET":
@@ -1037,7 +1043,7 @@ class Application:
 					raise ConsoleError("角色无效或用户名已存在")
 				token = self.store.new_local_user_invite(username, display_name, role == "admin", str(session["login"]))
 				invite_url = f"{self.settings.public_url}/invite?" + urllib.parse.urlencode({"token": token})
-				content = f'<header><h1>邀请已创建</h1><a class="button" href="/support/users">返回用户管理</a></header><section class="card"><p>此链接 30 分钟内有效且只能使用一次，请通过安全渠道发给 <strong>{html.escape(username)}</strong>。</p><div class="secret-heading"><h2>邀请链接</h2><button type="button" class="copy-button" data-copy-target="invite-link">复制</button></div><div id="invite-link" class="secret">{html.escape(invite_url)}</div></section>'
+				content = f'<header><h1>邀请已创建</h1><a class="button" href="/connect/users">返回用户管理</a></header><section class="card"><p>此链接 30 分钟内有效且只能使用一次，请通过安全渠道发给 <strong>{html.escape(username)}</strong>。</p><div class="secret-heading"><h2>邀请链接</h2><button type="button" class="copy-button" data-copy-target="invite-link">复制</button></div><div id="invite-link" class="secret">{html.escape(invite_url)}</div></section>'
 				return self.response(start_response, HTTPStatus.OK, page("邀请已创建", content))
 			if path.startswith("/users/") and path.endswith("/reset-totp") and method == "POST":
 				if not bool(session["is_admin"]):
@@ -1048,7 +1054,7 @@ class Application:
 				username = path.removeprefix("/users/").removesuffix("/reset-totp")
 				token = self.store.new_local_user_totp_reset(username, str(session["login"]))
 				invite_url = f"{self.settings.public_url}/invite?" + urllib.parse.urlencode({"token": token})
-				content = f'<header><h1>TOTP 重绑链接已创建</h1><a class="button" href="/support/users">返回用户管理</a></header><section class="card"><p>链接 30 分钟内有效且只能使用一次。完成绑定后，该用户现有登录会话会被撤销。</p><div class="secret-heading"><h2>重绑链接</h2><button type="button" class="copy-button" data-copy-target="invite-link">复制</button></div><div id="invite-link" class="secret">{html.escape(invite_url)}</div></section>'
+				content = f'<header><h1>TOTP 重绑链接已创建</h1><a class="button" href="/connect/users">返回用户管理</a></header><section class="card"><p>链接 30 分钟内有效且只能使用一次。完成绑定后，该用户现有登录会话会被撤销。</p><div class="secret-heading"><h2>重绑链接</h2><button type="button" class="copy-button" data-copy-target="invite-link">复制</button></div><div id="invite-link" class="secret">{html.escape(invite_url)}</div></section>'
 				return self.response(start_response, HTTPStatus.OK, page("重绑 TOTP", content))
 			if path.startswith("/users/") and path.endswith("/toggle") and method == "POST":
 				if not bool(session["is_admin"]):
@@ -1061,7 +1067,7 @@ class Application:
 				if user is None or username == str(session["login"]):
 					raise ConsoleError("不能修改当前用户或用户不存在")
 				self.store.set_local_user_enabled(username, not bool(user["enabled"]))
-				return self.redirect(start_response, "/support/users")
+				return self.redirect(start_response, "/connect/users")
 			if path == "/" and method == "GET":
 				return self.dashboard(start_response, session)
 			if path == "/sessions" and method == "GET":
@@ -1083,16 +1089,16 @@ class Application:
 					"--platform", "linux",
 				))
 				if not isinstance(created, dict) or not isinstance(created.get("token"), str):
-					raise ConsoleError("支持会话服务返回无效数据")
+					raise ConsoleError("远程会话服务返回无效数据")
 				if not isinstance(created.get("operator_claim_token"), str):
 					if not isinstance(created.get("customer_command"), str):
-						raise ConsoleError("支持会话服务未返回支持机授权")
+						raise ConsoleError("远程会话服务未返回支持机授权")
 					legacy_hint = "无需另输会话码。" if created.get("auth_mode") == "enrollment-key" else ""
-					content = f'''<header><h1>支持会话已创建</h1><a href="/support/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created.get("id", "")))}</code></p><div class="secret-section"><div class="secret-heading"><h2>客户执行命令</h2><button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div><div id="customer-command" class="secret">{html.escape(created["customer_command"])}</div></div><p class="muted">此会话使用兼容接入方式。{legacy_hint}</p></section>'''
+					content = f'''<header><h1>远程会话已创建</h1><a href="/connect/">返回会话列表</a></header><section class="card"><p>会话 ID：<code>{html.escape(str(created.get("id", "")))}</code></p><div class="secret-section"><div class="secret-heading"><h2>客户执行命令</h2><button type="button" class="copy-button" data-copy-target="customer-command">复制</button></div><div id="customer-command" class="secret">{html.escape(created["customer_command"])}</div></div><p class="muted">此会话使用兼容接入方式。{legacy_hint}</p></section>'''
 					return self.response(start_response, HTTPStatus.OK, page("会话已创建", content))
 				grant = json.dumps({"id": created["id"], "token": created["operator_claim_token"], "url": self.settings.public_url}, separators=(",", ":"))
 				if not isinstance(created, dict) or created.get("platform") != "linux" or not isinstance(created.get("customer_command"), str):
-					raise ConsoleError("支持会话服务未能生成默认 Linux 接入命令")
+					raise ConsoleError("远程会话服务未能生成默认 Linux 接入命令")
 				content = configured_session_content(created, str(session["csrf"]), customer, purpose,
 					operator_platform, grant, self.settings.public_url)
 				return self.response(start_response, HTTPStatus.OK, page("会话已创建", content))
@@ -1129,7 +1135,7 @@ class Application:
 						"customer_command": form.get("customer_command", ""),
 					}
 				if not isinstance(created, dict) or created.get("platform") != platform or not isinstance(created.get("customer_command"), str):
-					raise ConsoleError("支持会话服务未返回接入命令")
+					raise ConsoleError("远程会话服务未返回接入命令")
 				content = configured_session_content(created, str(session["csrf"]), customer, purpose,
 					operator_platform, grant, self.settings.public_url)
 				return self.response(start_response, HTTPStatus.OK, page("会话命令", content))
@@ -1142,7 +1148,7 @@ class Application:
 				if not secrets.compare_digest(form.get("csrf", ""), str(session["csrf"])):
 					raise ConsoleError("请求校验失败，请刷新页面后重试")
 				manager("close", target, "--closed-by", str(session["login"]))
-				return self.redirect(start_response, "/support/")
+				return self.redirect(start_response, "/connect/")
 			if path.startswith("/session/"):
 				target = path.removeprefix("/session/")
 				if not target or "/" in target:
@@ -1150,7 +1156,7 @@ class Application:
 				if method == "GET":
 					info = json.loads(manager("show", target))
 					if not isinstance(info, dict):
-						raise ConsoleError("支持会话服务返回无效数据")
+						raise ConsoleError("远程会话服务返回无效数据")
 					keys = [key for key in DETAIL_FIELD_ORDER if key in info]
 					keys.extend(key for key in info if key not in DETAIL_FIELD_LABELS)
 					fields = []
@@ -1165,8 +1171,8 @@ class Application:
 					if status in CLOSABLE_STATUSES:
 						action_note = "关闭会话会先调度客户侧清理，再撤销连接，且无法恢复。"
 						destructive_action = (
-							f'<form method="post" action="/support/session/{escaped_target}/close" '
-							'onsubmit="return confirm(\'确定关闭这个支持会话吗？系统会先调度客户侧清理，再撤销连接。\')">'
+							f'<form method="post" action="/connect/session/{escaped_target}/close" '
+							'onsubmit="return confirm(\'确定关闭这个远程会话吗？系统会先调度客户侧清理，再撤销连接。\')">'
 							f'<input type="hidden" name="csrf" value="{html.escape(str(session["csrf"]))}">'
 							'<button type="submit" class="danger">关闭会话</button></form>'
 						)
@@ -1176,7 +1182,7 @@ class Application:
 						action_note = "该会话已经结束，不会再接受客户连接。"
 					detail_actions = (
 						f'<div class="danger-zone"><p>{action_note}</p><div class="detail-actions">'
-						f'<a class="button" href="/support/">关闭</a>{destructive_action}</div></div>'
+						f'<a class="button" href="/connect/">关闭</a>{destructive_action}</div></div>'
 					)
 					content = (
 						f'<header><h1>会话 {escaped_target}</h1></header>'
@@ -1194,7 +1200,7 @@ class QuietHandler(WSGIRequestHandler):
 
 
 def main() -> int:
-	config_path = pathlib.Path(os.environ.get("TSUITE_SUPPORT_CONSOLE_CONFIG", "/etc/tsuite-support-console/config.json"))
+	config_path = pathlib.Path(os.environ.get("TSUITE_SUPPORT_CONSOLE_CONFIG", "/etc/tsuite-connect-console/config.json"))
 	settings = Settings.load(config_path)
 	application = Application(settings)
 	with contextlib.suppress(ConsoleError):

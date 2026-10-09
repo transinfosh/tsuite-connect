@@ -26,8 +26,8 @@ CUSTOMER_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 SESSION_RE = re.compile(r"^[a-f0-9]{12}$")
 CREATED_BY_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
 PUBLIC_KEY_RE = re.compile(r"^(ssh-ed25519|ecdsa-sha2-nistp256) [A-Za-z0-9+/=]+$")
-CONTROL_PATH = "/var/lib/tsuite-support-operator/ssh-control-%C"
-CONFIG_PATH = pathlib.Path("/etc/tsuite-support-control/action.json")
+CONTROL_PATH = "/var/lib/tsuite-connect-operator/ssh-control-%C"
+CONFIG_PATH = pathlib.Path("/etc/tsuite-connect-control/action.json")
 
 
 class RemoteActionError(RuntimeError):
@@ -260,7 +260,7 @@ def create_session(
 		raise RemoteActionError("客户操作系统无效")
 	sessions_dir = settings.state_dir / "sessions"
 	sessions_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-	with tempfile.TemporaryDirectory(prefix="tsuite-support-operator.") as temporary_dir:
+	with tempfile.TemporaryDirectory(prefix="tsuite-connect-operator.") as temporary_dir:
 		key_path = pathlib.Path(temporary_dir) / "operator_ed25519"
 		key_result = run([
 			"ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C",
@@ -410,10 +410,10 @@ def customer_ssh_args(
 
 def connect_with_activity(arguments, base_arguments, remote, session_id, running_command, env=None):
 	import importlib.util
-	module_path = pathlib.Path(__file__).resolve().with_name("tsuite_support_activity.py")
+	module_path = pathlib.Path(__file__).resolve().with_name("tsuite_connect_activity.py")
 	if not module_path.is_file():
-		module_path = pathlib.Path(__file__).resolve().parents[1] / "operator" / "tsuite_support_activity.py"
-	spec = importlib.util.spec_from_file_location("tsuite_support_activity", module_path)
+		module_path = pathlib.Path(__file__).resolve().parents[1] / "operator" / "tsuite_connect_activity.py"
+	spec = importlib.util.spec_from_file_location("tsuite_connect_activity", module_path)
 	module = importlib.util.module_from_spec(spec)
 	spec.loader.exec_module(module)
 	return module.connect(arguments, base_arguments, remote.get("platform", "linux"), session_id,

@@ -3,13 +3,13 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-INSTALL_ROOT="/usr/local/lib/tsuite-support-console"
-CONFIG_DIR="/etc/tsuite-support-console"
-STATE_DIR="/var/lib/tsuite-support-console"
-SERVICE_USER="tsuite-support-console"
-SERVICE_GROUP="tsuite-support-console"
-BROKER_USER="tsuite-support-operator"
-BROKER_STATE_DIR="/var/lib/tsuite-support-operator"
+INSTALL_ROOT="/usr/local/lib/tsuite-connect-console"
+CONFIG_DIR="/etc/tsuite-connect-console"
+STATE_DIR="/var/lib/tsuite-connect-console"
+SERVICE_USER="tsuite-connect-console"
+SERVICE_GROUP="tsuite-connect-console"
+BROKER_USER="tsuite-connect-operator"
+BROKER_STATE_DIR="/var/lib/tsuite-connect-operator"
 
 GITHUB_CLIENT_ID=""
 GITHUB_CLIENT_SECRET_FILE=""
@@ -28,7 +28,7 @@ die() {
 
 usage() {
 	cat <<'EOF'
-用法: sudo ./install-support-console.sh [选项]
+用法: sudo ./install-connect-console.sh [选项]
 
 必填：
   --github-client-id ID            GitHub OAuth App Client ID
@@ -78,8 +78,8 @@ if [[ -n "$LOCAL_ADMIN_USER$LOCAL_ADMIN_PASSWORD_FILE$LOCAL_ADMIN_TOTP_SECRET_FI
 	[[ "$LOCAL_ADMIN_USER" =~ ^[A-Za-z0-9_-]{3,64}$ ]] || die "本地管理员用户名无效"
 	[[ -f "$LOCAL_ADMIN_PASSWORD_FILE" && -f "$LOCAL_ADMIN_TOTP_SECRET_FILE" ]] || die "本地管理员密码和 TOTP 密钥文件必须同时提供"
 fi
-[[ -f /etc/tsuite-support-control/action.json ]] || die "请先运行 prepare-support-access.sh"
-[[ -x /usr/local/bin/tsuite-support-console-action ]] || die "缺少控制台远程操作程序"
+[[ -f /etc/tsuite-connect-control/action.json ]] || die "请先运行 prepare-connect-access.sh"
+[[ -x /usr/local/bin/tsuite-connect-console-action ]] || die "缺少控制台远程操作程序"
 id "$BROKER_USER" >/dev/null 2>&1 || die "缺少支持会话 broker 用户"
 for command_name in curl gpasswd getent groupadd install python3 qrencode ss sudo systemctl useradd usermod; do
 	command -v "$command_name" >/dev/null 2>&1 || die "缺少命令: $command_name"
@@ -101,13 +101,13 @@ install -d -m 0755 -o root -g root "$INSTALL_ROOT"
 install -d -m 0750 -o root -g "$SERVICE_GROUP" "$CONFIG_DIR"
 install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$STATE_DIR"
 install -m 0755 -o root -g root \
-	"$REPO_ROOT/console/tsuite_support_console.py" \
-	"$INSTALL_ROOT/tsuite-support-console"
+	"$REPO_ROOT/console/tsuite_connect_console.py" \
+	"$INSTALL_ROOT/tsuite-connect-console"
 
-install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_support_portable.py" "$INSTALL_ROOT/tsuite_support_portable.py"
-install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_support_activity.py" "$INSTALL_ROOT/tsuite_support_activity.py"
-install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_support_windows.ps1" "$INSTALL_ROOT/tsuite_support_windows.ps1"
-install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_support_windows_relay.cs" "$INSTALL_ROOT/tsuite_support_windows_relay.cs"
+install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_connect_portable.py" "$INSTALL_ROOT/tsuite_connect_portable.py"
+install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_connect_activity.py" "$INSTALL_ROOT/tsuite_connect_activity.py"
+install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_connect_windows.ps1" "$INSTALL_ROOT/tsuite_connect_windows.ps1"
+install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_connect_windows_relay.cs" "$INSTALL_ROOT/tsuite_connect_windows_relay.cs"
 
 config_temporary="$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")"
 trap 'rm -f -- "$config_temporary"' EXIT
@@ -135,11 +135,13 @@ value = {
     "github_client_id": client_id,
     "github_client_secret": secret,
     "github_allowed_org": allowed_org,
-    "public_url": f"https://{host}/support",
+    "public_url": f"https://{host}/connect",
     "state_dir": state_dir,
     "listen_host": "127.0.0.1",
     "listen_port": 8765,
 }
+if existing.get("github_callback_url"):
+    value["github_callback_url"] = existing["github_callback_url"]
 if allowed_team:
     value["github_allowed_team"] = allowed_team
 if local_user:
@@ -160,7 +162,7 @@ install -m 0640 -o root -g "$SERVICE_GROUP" "$config_temporary" "$CONFIG_DIR/con
 rm -f "$config_temporary"
 trap - EXIT
 
-cat >/etc/systemd/system/tsuite-support-console.service <<EOF
+cat >/etc/systemd/system/tsuite-connect-console.service <<EOF
 [Unit]
 Description=TSuite GitHub support management console
 After=network-online.target
@@ -170,8 +172,8 @@ Wants=network-online.target
 Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_GROUP
-ExecStartPre=/usr/bin/sudo -n -u $BROKER_USER /usr/local/bin/tsuite-support-console-action list
-ExecStart=/usr/bin/python3 $INSTALL_ROOT/tsuite-support-console
+ExecStartPre=/usr/bin/sudo -n -u $BROKER_USER /usr/local/bin/tsuite-connect-console-action list
+ExecStart=/usr/bin/python3 $INSTALL_ROOT/tsuite-connect-console
 Environment=HTTPS_PROXY=$HTTPS_PROXY_URL
 Environment=HTTP_PROXY=$HTTPS_PROXY_URL
 Restart=on-failure
@@ -197,7 +199,7 @@ WantedBy=multi-user.target
 EOF
 
 # 该服务只通过精确 sudoers 规则调用 broker；它不能读取 broker 私钥，也不能调用 ssh/run/force-close。
-sudo -n -u "$BROKER_USER" /usr/local/bin/tsuite-support-console-action self-test >/dev/null || \
+sudo -n -u "$BROKER_USER" /usr/local/bin/tsuite-connect-console-action self-test >/dev/null || \
 	die "支持会话 broker 自检失败"
 
 # 新 broker 通道验证成功后移除旧页面曾可读取的共享/固定私钥副本。
@@ -209,9 +211,9 @@ rm -f -- \
 	"$CONFIG_DIR/known_hosts"
 
 systemctl daemon-reload
-systemctl enable --now tsuite-support-console.service
-systemctl restart tsuite-support-console.service
-systemctl is-active --quiet tsuite-support-console.service || die "支持管理页面未启动"
+systemctl enable --now tsuite-connect-console.service
+systemctl restart tsuite-connect-console.service
+systemctl is-active --quiet tsuite-connect-console.service || die "支持管理页面未启动"
 for _ in {1..20}; do
 	ss -lnt | grep -q '127.0.0.1:8765' && break
 	sleep 0.25
@@ -220,4 +222,4 @@ ss -lnt | grep -q '127.0.0.1:8765' || die "支持管理页面未监听本机端�
 http_status="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/)"
 [[ "$http_status" == "401" ]] || die "本机支持页面健康检查失败: HTTP $http_status"
 
-printf 'GitHub 支持管理页面安装完成：https://%s/support/\n' "$PUBLIC_HOST"
+printf 'GitHub 支持管理页面安装完成：https://%s/connect/\n' "$PUBLIC_HOST"

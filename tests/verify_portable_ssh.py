@@ -65,7 +65,7 @@ with tempfile.TemporaryDirectory(prefix="portable-sshd-", dir=pathlib.Path.home(
     relay = root / "relay.py"
     relay.write_text(
         'import importlib.util,json,pathlib\ns=importlib.util.spec_from_file_location("relay",'
-        + repr(str(r / "bastion/tsuite_support_console_action.py"))
+        + repr(str(r / "bastion/tsuite_connect_console_action.py"))
         + ")\nm=importlib.util.module_from_spec(s);s.loader.exec_module(m)\nm.manager_output=lambda *args:pathlib.Path("
         + repr(str(root / "session.json"))
         + ').read_text()\nraise SystemExit(m.relay_session("012345abcdef"))\n'
@@ -155,7 +155,7 @@ with tempfile.TemporaryDirectory(prefix="portable-sshd-", dir=pathlib.Path.home(
             powershell = root / "native-smoke.ps1"
             powershell.write_text(
                 "$ErrorActionPreference = 'Stop'\n. "
-                + ps_quote(r / "operator/tsuite_support_windows.ps1")
+                + ps_quote(r / "operator/tsuite_connect_windows.ps1")
                 + " -Mode Library\nInitialize-OperatorRelay\n$root = " + ps_quote(native)
                 + "\n$tools = [pscustomobject]@{ Ssh = " + ps_quote(shutil.which("ssh")) + " }\n"
                 + f"$settings = [pscustomobject]@{{id = '012345abcdef'; host = '127.0.0.1'; port = {ep}; user = '{username}'}}\n"
@@ -165,11 +165,11 @@ with tempfile.TemporaryDirectory(prefix="portable-sshd-", dir=pathlib.Path.home(
                 + "$arguments = [string[]](Get-OperatorCustomerArguments $root $settings $remote $tools)\n"
                 # The fixture uses only the current user and never creates a support account.
                 + f"$arguments[$arguments.Length - 1] = '{username}@127.0.0.1'\n"
-                + "$result = [TSuiteSupport.WindowsRelay]::Capture($tools.Ssh, [string[]](@('-T') + $arguments + @('printf native-certificate-proxy-ok')), 20000)\n"
+                + "$result = [TSuiteConnect.WindowsRelay]::Capture($tools.Ssh, [string[]](@('-T') + $arguments + @('printf native-certificate-proxy-ok')), 20000)\n"
                 + "if ($result.ExitCode -ne 0 -or $result.Output -cne 'native-certificate-proxy-ok') { throw ('Native SSH proxy failed: ' + $result.Error) }\n"
                 + "[IO.File]::WriteAllText((Join-Path $root 'customer_known_hosts'), '[127.0.0.1]:"
                 + str(cp) + " " + wrong + "')\n"
-                + "$result = [TSuiteSupport.WindowsRelay]::Capture($tools.Ssh, [string[]](@('-T') + $arguments + @('true')), 20000)\n"
+                + "$result = [TSuiteConnect.WindowsRelay]::Capture($tools.Ssh, [string[]](@('-T') + $arguments + @('true')), 20000)\n"
                 + "if ($result.ExitCode -eq 0) { throw 'Changed pinned host key was accepted.' }\n"
                 + "Write-Output 'Native PowerShell/C# real certificate login, Edge proxy and pinned host rejection: PASS'\n"
             )

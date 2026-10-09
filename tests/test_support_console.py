@@ -17,7 +17,7 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
-	"tsuite_support_console", ROOT / "console" / "tsuite_support_console.py"
+	"tsuite_connect_console", ROOT / "console" / "tsuite_connect_console.py"
 )
 CONSOLE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -25,7 +25,7 @@ sys.modules[SPEC.name] = CONSOLE
 SPEC.loader.exec_module(CONSOLE)
 
 REMOTE_SPEC = importlib.util.spec_from_file_location(
-	"tsuite_support_remote_action", ROOT / "console" / "tsuite_support_remote_action.py"
+	"tsuite_connect_remote_action", ROOT / "console" / "tsuite_connect_remote_action.py"
 )
 REMOTE = importlib.util.module_from_spec(REMOTE_SPEC)
 assert REMOTE_SPEC.loader is not None
@@ -33,16 +33,16 @@ sys.modules[REMOTE_SPEC.name] = REMOTE
 REMOTE_SPEC.loader.exec_module(REMOTE)
 
 BASTION_ACTION_SPEC = importlib.util.spec_from_file_location(
-	"tsuite_support_console_action", ROOT / "bastion" / "tsuite_support_console_action.py"
+	"tsuite_connect_console_action", ROOT / "bastion" / "tsuite_connect_console_action.py"
 )
 BASTION_ACTION = importlib.util.module_from_spec(BASTION_ACTION_SPEC)
 assert BASTION_ACTION_SPEC.loader is not None
 sys.modules[BASTION_ACTION_SPEC.name] = BASTION_ACTION
 BASTION_ACTION_SPEC.loader.exec_module(BASTION_ACTION)
 
-CLI_PATH = ROOT / "operator" / "tsuite-support"
+CLI_PATH = ROOT / "operator" / "tsuite-connect"
 CLI_SPEC = importlib.util.spec_from_loader(
-	"tsuite_support_cli", SourceFileLoader("tsuite_support_cli", str(CLI_PATH))
+	"tsuite_connect_cli", SourceFileLoader("tsuite_connect_cli", str(CLI_PATH))
 )
 CLI = importlib.util.module_from_spec(CLI_SPEC)
 assert CLI_SPEC.loader is not None
@@ -58,7 +58,7 @@ class SupportConsoleTest(unittest.TestCase):
 			client_secret="a" * 32,
 			allowed_org="transinfosh",
 			allowed_team="support",
-			public_url="https://edge.example.com/support",
+			public_url="https://edge.example.com/connect",
 			state_dir=pathlib.Path(self.temporary.name) / "state",
 		)
 
@@ -94,8 +94,33 @@ class SupportConsoleTest(unittest.TestCase):
 			local_totp_secret="JBSWY3DPEHPK3PXP",
 		)
 
+	def test_legacy_oauth_callback_keeps_browser_binding_after_rename(self):
+		from dataclasses import replace
+		settings = replace(self.settings, github_callback_url="https://edge.example.com/support/auth/github/callback")
+		settings.validate()
+		app = CONSOLE.Application(settings)
+		response, _ = self.call(app, "/login")
+		location = dict(response["headers"])["Location"]
+		query = urllib.parse.parse_qs(urllib.parse.urlsplit(location).query)
+		self.assertEqual(query["redirect_uri"], [settings.github_callback_url])
+		cookie = next(value for name, value in response["headers"] if name == "Set-Cookie")
+		self.assertIn("Path=/support/auth/github/callback;", cookie)
+		state = query["state"][0]
+		with mock.patch.object(CONSOLE, "github_identity", return_value=("alice", "Alice")):
+			response, _ = self.call(app, "/auth/github/callback", cookie="tsuite_connect_oauth=" + state, query="state=" + state + "&code=test")
+		self.assertIn(("Location", "/connect/"), response["headers"])
+		cookies = [value for name, value in response["headers"] if name == "Set-Cookie"]
+		self.assertTrue(any("Path=/connect;" in value for value in cookies))
+		self.assertTrue(any("Path=/support/auth/github/callback;" in value and "Max-Age=0" in value for value in cookies))
+
+	def test_callback_override_cannot_leave_the_public_origin(self):
+		from dataclasses import replace
+		for callback in ("https://other.example.com/support/auth/github/callback", "http://edge.example.com/support/auth/github/callback", "https://edge.example.com/wrong"):
+			with self.assertRaises(CONSOLE.ConsoleError):
+				replace(self.settings, github_callback_url=callback).validate()
+
 	def test_callback_url_and_pkce_challenge_are_deterministic(self):
-		self.assertEqual(self.settings.callback_url, "https://edge.example.com/support/auth/github/callback")
+		self.assertEqual(self.settings.callback_url, "https://edge.example.com/connect/auth/github/callback")
 		self.assertEqual(CONSOLE.code_challenge("abc"), "ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0")
 
 	def test_oauth_state_can_only_be_consumed_once(self):
@@ -129,7 +154,7 @@ class SupportConsoleTest(unittest.TestCase):
 		captured, content = self.call(app, "/")
 		self.assertTrue(captured["status"].startswith("401"))
 		self.assertIn("使用 GitHub 登录", content)
-		self.assertIn('href="/support/login"', content)
+		self.assertIn('href="/connect/login"', content)
 		self.assertIn(("Cache-Control", "no-store"), captured["headers"])
 
 	def test_local_login_asks_for_totp_only_after_password(self):
@@ -148,14 +173,14 @@ class SupportConsoleTest(unittest.TestCase):
 		self.assertIn('name="totp"', content)
 		challenge_cookie = next(
 			value.split(";", 1)[0] for key, value in captured["headers"]
-			if key == "Set-Cookie" and value.startswith("tsuite_support_local=")
+			if key == "Set-Cookie" and value.startswith("tsuite_connect_local=")
 		)
 		with mock.patch.object(CONSOLE, "verify_totp", return_value=True):
 			captured, _ = self.call(
 				app, "/login/local/totp", "POST", "totp=123456", challenge_cookie,
 			)
 		self.assertTrue(captured["status"].startswith("303"))
-		self.assertIn(("Location", "/support/"), captured["headers"])
+		self.assertIn(("Location", "/connect/"), captured["headers"])
 
 	def test_local_login_rejects_bad_password_before_totp(self):
 		app = CONSOLE.Application(self.local_settings())
@@ -169,7 +194,7 @@ class SupportConsoleTest(unittest.TestCase):
 	def test_admin_invites_user_who_sets_password_and_binds_totp(self):
 		app = CONSOLE.Application(self.local_settings())
 		session_id, csrf = app.store.new_session("support-admin", "support-admin", True, "local")
-		cookie = f"tsuite_support_session={session_id}"
+		cookie = f"tsuite_connect_session={session_id}"
 		captured, content = self.call(
 			app, "/users/invite", "POST",
 			urllib.parse.urlencode({"csrf": csrf, "username": "alice", "display_name": "Alice", "role": "operator"}),
@@ -221,19 +246,19 @@ class SupportConsoleTest(unittest.TestCase):
 	def test_operator_cannot_manage_users(self):
 		app = CONSOLE.Application(self.local_settings())
 		session_id, _ = app.store.new_session("operator", "Operator", False, "local")
-		captured, _ = self.call(app, "/users", cookie=f"tsuite_support_session={session_id}")
+		captured, _ = self.call(app, "/users", cookie=f"tsuite_connect_session={session_id}")
 		self.assertTrue(captured["status"].startswith("403"))
 
 	def test_dashboard_uses_the_public_support_prefix(self):
 		app = CONSOLE.Application(self.settings)
 		session_id, _ = app.store.new_session("alice", "Alice")
 		with mock.patch.object(CONSOLE, "manager") as manager:
-			captured, content = self.call(app, "/", cookie=f"tsuite_support_session={session_id}")
+			captured, content = self.call(app, "/", cookie=f"tsuite_connect_session={session_id}")
 		self.assertTrue(captured["status"].startswith("200"))
-		self.assertIn('action="/support/session"', content)
+		self.assertIn('action="/connect/session"', content)
 		self.assertNotIn('name="operator_platform"', content)
-		self.assertIn('action="/support/logout"', content)
-		self.assertIn('fetch("/support/sessions"', content)
+		self.assertIn('action="/connect/logout"', content)
+		self.assertIn('fetch("/connect/sessions"', content)
 		self.assertIn("正在加载会话列表", content)
 		manager.assert_not_called()
 
@@ -246,7 +271,7 @@ class SupportConsoleTest(unittest.TestCase):
 			"111111111111\tcustomer-two\texpired\t22002\n"
 		)
 		with mock.patch.object(CONSOLE, "manager", return_value=listing):
-			captured, content = self.call(app, "/sessions", cookie=f"tsuite_support_session={session_id}")
+			captured, content = self.call(app, "/sessions", cookie=f"tsuite_connect_session={session_id}")
 		self.assertTrue(captured["status"].startswith("200"))
 		self.assertIn(("Content-Type", "application/json; charset=utf-8"), captured["headers"])
 		value = json.loads(content)
@@ -261,30 +286,30 @@ class SupportConsoleTest(unittest.TestCase):
 		self.assertNotIn("customer-two", content)
 		self.assertNotIn("历史会话", content)
 		self.assertIn("<strong>1</strong> 个客户环境", content)
-		self.assertIn('action="/support/session/fedcba543210/close"', content)
-		self.assertNotIn('action="/support/session/012345abcdef/close"', content)
+		self.assertIn('action="/connect/session/fedcba543210/close"', content)
+		self.assertNotIn('action="/connect/session/012345abcdef/close"', content)
 		self.assertIn(".inline-actions form{margin:0 0 0 auto}", CONSOLE.page("test", "").decode())
 
 	def test_dashboard_empty_after_all_sessions_end(self):
 		app = CONSOLE.Application(self.settings)
 		session_id, _ = app.store.new_session("alice", "Alice")
 		with mock.patch.object(CONSOLE, "manager", return_value="012345abcdef\told-customer\tclosed\t22000\n"):
-			_, content = self.call(app, "/sessions", cookie=f"tsuite_support_session={session_id}")
+			_, content = self.call(app, "/sessions", cookie=f"tsuite_connect_session={session_id}")
 		value = json.loads(content)
-		self.assertIn("当前没有活动支持会话", value["groups"])
+		self.assertIn("当前没有活动远程会话", value["groups"])
 		self.assertNotIn("old-customer", value["groups"])
 		self.assertIn("<strong>0</strong> 个客户环境", value["summary"])
 
 	def test_create_accepts_omitted_purpose(self):
 		app = CONSOLE.Application(self.settings)
 		session_id, csrf = app.store.new_session("alice", "Alice")
-		_, dashboard = self.call(app, "/", cookie=f"tsuite_support_session={session_id}")
+		_, dashboard = self.call(app, "/", cookie=f"tsuite_connect_session={session_id}")
 		self.assertIn("支持用途（可选）", dashboard)
 		self.assertNotIn('name="purpose" required', dashboard)
 		with mock.patch.object(CONSOLE, "manager", return_value=json.dumps({
 			"id": "012345abcdef", "token": "", "auth_mode": "enrollment-key", "customer_command": "command",
 		})) as manager:
-			captured, _ = self.call(app, "/session", "POST", f"csrf={csrf}&customer=customer-one", f"tsuite_support_session={session_id}")
+			captured, _ = self.call(app, "/session", "POST", f"csrf={csrf}&customer=customer-one", f"tsuite_connect_session={session_id}")
 		self.assertTrue(captured["status"].startswith("200"))
 		manager.assert_called_once_with("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "linux")
 
@@ -304,7 +329,7 @@ class SupportConsoleTest(unittest.TestCase):
 		}
 		with mock.patch.object(CONSOLE, "manager", return_value=json.dumps(info)):
 			captured, content = self.call(
-				app, "/session/012345abcdef", cookie=f"tsuite_support_session={session_id}"
+				app, "/session/012345abcdef", cookie=f"tsuite_connect_session={session_id}"
 			)
 		self.assertTrue(captured["status"].startswith("200"))
 		self.assertIn("<th>客户环境标识</th>", content)
@@ -314,7 +339,7 @@ class SupportConsoleTest(unittest.TestCase):
 		self.assertIn("2026-08-28 09:53:54（UTC+8）", content)
 		self.assertIn("<th>隧道可达</th><td>否</td>", content)
 		self.assertIn("等待客户", content)
-		self.assertIn('class="button" href="/support/">关闭</a>', content)
+		self.assertIn('class="button" href="/connect/">关闭</a>', content)
 		self.assertIn('class="danger">关闭会话</button>', content)
 		self.assertIn('<div class="detail-actions"><a class="button"', content)
 		self.assertLess(content.index(">关闭</a>"), content.index(">关闭会话</button>"))
@@ -329,10 +354,10 @@ class SupportConsoleTest(unittest.TestCase):
 				"/session/012345abcdef/close",
 				"POST",
 				f"csrf={csrf}",
-				f"tsuite_support_session={session_id}",
+				f"tsuite_connect_session={session_id}",
 			)
 		self.assertTrue(captured["status"].startswith("303"))
-		self.assertIn(("Location", "/support/"), captured["headers"])
+		self.assertIn(("Location", "/connect/"), captured["headers"])
 		manager.assert_called_once_with("close", "012345abcdef", "--closed-by", "alice")
 
 	def test_key_enrollment_page_has_only_customer_command(self):
@@ -342,7 +367,7 @@ class SupportConsoleTest(unittest.TestCase):
 			"id": "012345abcdef", "token": "unused-compatibility-field", "auth_mode": "enrollment-key",
 			"customer_command": "curl https://example.invalid | sudo bash",
 		})):
-			captured, content = self.call(app, "/session", "POST", f"csrf={csrf}&customer=customer-one&purpose=upgrade", f"tsuite_support_session={session_id}")
+			captured, content = self.call(app, "/session", "POST", f"csrf={csrf}&customer=customer-one&purpose=upgrade", f"tsuite_connect_session={session_id}")
 		self.assertTrue(captured["status"].startswith("200"))
 		self.assertNotIn('id="support-token"', content)
 		self.assertNotIn("unused-compatibility-field", content)
@@ -355,7 +380,7 @@ class SupportConsoleTest(unittest.TestCase):
 		with mock.patch.object(CONSOLE, "manager", return_value=json.dumps({
 			"id": "012345abcdef", "token": "do-not-persist", "customer_command": "curl https://example.invalid | sudo bash",
 		})) as manager:
-			captured, content = self.call(app, "/session", "POST", f"csrf={csrf}&customer=customer-one&purpose=upgrade-srm", f"tsuite_support_session={session_id}")
+			captured, content = self.call(app, "/session", "POST", f"csrf={csrf}&customer=customer-one&purpose=upgrade-srm", f"tsuite_connect_session={session_id}")
 		self.assertTrue(captured["status"].startswith("200"))
 		manager.assert_called_once_with("create", "customer-one", "--created-by", "alice", "--purpose", "upgrade-srm", "--platform", "linux")
 		self.assertNotIn("do-not-persist", content)
@@ -367,14 +392,14 @@ class SupportConsoleTest(unittest.TestCase):
 		with app.store.connection() as connection:
 			self.assertEqual(connection.execute("SELECT COUNT(*) FROM web_session").fetchone()[0], 1)
 			self.assertEqual(connection.execute("SELECT COUNT(*) FROM oauth_state").fetchone()[0], 0)
-		captured, content = self.call(app, "/session", "POST", "csrf=wrong&customer=customer-one&purpose=upgrade-srm", f"tsuite_support_session={session_id}")
+		captured, content = self.call(app, "/session", "POST", "csrf=wrong&customer=customer-one&purpose=upgrade-srm", f"tsuite_connect_session={session_id}")
 		self.assertTrue(captured["status"].startswith("400"))
 		self.assertNotIn("do-not-persist", content)
 
 	def test_manager_bridge_is_fixed_and_not_shell_based(self):
-		action = (ROOT / "bastion" / "tsuite_support_console_action.py").read_text(encoding="utf-8")
+		action = (ROOT / "bastion" / "tsuite_connect_console_action.py").read_text(encoding="utf-8")
 		bridge = (ROOT / "bastion" / "install-console-bridge.sh").read_text(encoding="utf-8")
-		remote = (ROOT / "console" / "tsuite_support_remote_action.py").read_text(encoding="utf-8")
+		remote = (ROOT / "console" / "tsuite_connect_remote_action.py").read_text(encoding="utf-8")
 		self.assertIn('"--operator-public-key", "-"', action)
 		self.assertNotIn("OPERATOR_PUBLIC_KEY", action)
 		self.assertIn("CUSTOMER_RE", action)
@@ -384,13 +409,13 @@ class SupportConsoleTest(unittest.TestCase):
 		self.assertIn('"ClearAllForwardings=yes"', remote)
 		self.assertIn('"ControlMaster=auto"', remote)
 		self.assertIn('"ControlPersist=3600"', remote)
-		self.assertIn('CONTROL_PATH = "/var/lib/tsuite-support-operator/ssh-control-%C"', remote)
+		self.assertIn('CONTROL_PATH = "/var/lib/tsuite-connect-operator/ssh-control-%C"', remote)
 		self.assertIn('remote_action(settings, "list", multiplex=False)', remote)
 		self.assertIn('"-o", "ControlMaster=no", "-o", "ControlPath=none"', remote)
 		self.assertIn('"sudo -n /usr/local/sbin/tsuite-support-client close"', remote)
 		self.assertIn('subparsers.add_parser("force-close")', remote)
 		self.assertIn('sudoers_file="/etc/sudoers.d/tsuite-support-session"', bridge)
-		self.assertNotIn('sudoers_file="/etc/sudoers.d/tsuite-support-console-bridge"', bridge)
+		self.assertNotIn('sudoers_file="/etc/sudoers.d/tsuite-connect-console-bridge"', bridge)
 		self.assertIn('command="/usr/local/sbin/tsuite-support-console-action --proxy",restrict', bridge)
 		self.assertNotIn("port-forwarding", bridge)
 		self.assertNotIn("permitopen=", bridge)

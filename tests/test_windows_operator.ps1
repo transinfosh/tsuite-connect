@@ -4,9 +4,9 @@ Set-StrictMode -Version Latest
 $operator = Join-Path (Split-Path -Parent $PSScriptRoot) 'operator'
 $errors = $null
 $null = [Management.Automation.Language.Parser]::ParseFile(
-    (Join-Path $operator 'tsuite_support_windows.ps1'), [ref]$null, [ref]$errors)
+    (Join-Path $operator 'tsuite_connect_windows.ps1'), [ref]$null, [ref]$errors)
 if ($errors) { throw ($errors | Out-String) }
-. (Join-Path $operator 'tsuite_support_windows.ps1') -Mode Library
+. (Join-Path $operator 'tsuite_connect_windows.ps1') -Mode Library
 Initialize-OperatorRelay
 function Assert-True($Value, [string]$Message) { if (-not $Value) { throw $Message } }
 function Assert-Rejected([scriptblock]$Action, [string]$Message) {
@@ -55,14 +55,14 @@ $windows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 try {
     if ($windows) {
         Set-OperatorDirectoryPermissions $script:testRoot
-        Assert-Rejected { [TSuiteSupport.WindowsRelay]::CreateSessionDirectory($script:testRoot) } 'Atomic session creation accepted an existing directory.'
+        Assert-Rejected { [TSuiteConnect.WindowsRelay]::CreateSessionDirectory($script:testRoot) } 'Atomic session creation accepted an existing directory.'
         $tools = Get-OperatorTools
     } else {
         $tools = [pscustomobject]@{ Ssh = (Get-Command ssh).Source; Keygen = (Get-Command ssh-keygen).Source }
     }
     # Exercise native CRT quoting against a real key generator (empty -N and a path with spaces).
     $identity = Join-Path $script:testRoot 'identity'
-    $keygen = [TSuiteSupport.WindowsRelay]::Capture($tools.Keygen,
+    $keygen = [TSuiteConnect.WindowsRelay]::Capture($tools.Keygen,
         [string[]]@('-q', '-t', 'ed25519', '-N', '', '-f', $identity), 20000)
     Assert-True ($keygen.ExitCode -eq 0) ('Key generation failed: ' + $keygen.Error)
     Assert-True (Test-Path -LiteralPath "$identity.pub") 'Empty passphrase/path quoting failed.'
@@ -74,14 +74,14 @@ try {
 
     $remote = [pscustomobject]@{ remote_port = 22000; customer_host_key = 'ssh-ed25519 AAAA' }
     $customer = [string[]](Get-OperatorCustomerArguments $script:testRoot $settings $remote $tools)
-    $parsed = [TSuiteSupport.WindowsRelay]::Capture($tools.Ssh, [string[]](@('-G') + $customer), 20000)
+    $parsed = [TSuiteConnect.WindowsRelay]::Capture($tools.Ssh, [string[]](@('-G') + $customer), 20000)
     Assert-True ($parsed.ExitCode -eq 0) ('SSH configuration failed: ' + $parsed.Error)
     $normalized = $script:testRoot.Replace('\', '/')
     Assert-True ($parsed.Output.Contains("certificatefile $normalized/identity-cert.pub")) 'SSH config path with spaces was split.'
     Assert-True ($parsed.Output.Contains("userknownhostsfile $normalized/customer_known_hosts")) 'Pinned customer host path was split.'
     Assert-True ($parsed.Output.Contains('stricthostkeychecking true') -or $parsed.Output.Contains('stricthostkeychecking yes')) 'Host checking disabled.'
     Assert-True ($parsed.Output.Contains('proxycommand')) 'Restricted Edge proxy missing.'
-    $edge = [TSuiteSupport.WindowsRelay]::Capture($tools.Ssh,
+    $edge = [TSuiteConnect.WindowsRelay]::Capture($tools.Ssh,
         [string[]](@('-G') + @(Get-OperatorEdgeArguments $script:testRoot $settings)), 20000)
     Assert-True ($edge.Output.Contains("identityfile $normalized/identity")) 'Edge identity path with spaces was split.'
     Assert-True ($edge.Output.Contains('hostname edge.example.com')) 'Edge host mismatch.'
@@ -151,7 +151,7 @@ public static class RelayFixture {
     $inputEncoding = [Console]::InputEncoding
     try {
         if ($windows) { [Console]::InputEncoding = New-Object Text.UTF8Encoding($true) }
-        $exitCode = [TSuiteSupport.WindowsRelay]::RunCommand($relayExecutable, $fixtureArgs, $reportArgs,
+        $exitCode = [TSuiteConnect.WindowsRelay]::RunCommand($relayExecutable, $fixtureArgs, $reportArgs,
             $inputStream, $outputStream, $errorStream)
         if ($windows) {
             Assert-True ([Console]::InputEncoding.GetPreamble().Length -eq 3) 'Relay changed the host input encoding.'
@@ -172,7 +172,7 @@ public static class RelayFixture {
     }
     Assert-Rejected {
         $sleep = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('Start-Sleep -Seconds 10'))
-        [TSuiteSupport.WindowsRelay]::Capture($hostExecutable,
+        [TSuiteConnect.WindowsRelay]::Capture($hostExecutable,
             [string[]]@('-NoProfile', '-NonInteractive', '-EncodedCommand', $sleep), 100)
     } 'SSH helper timeout was not enforced.'
 
@@ -191,7 +191,7 @@ public static class RelayFixture {
             }
         }
         $grantToken = 'A' * 43
-        $grantJson = @{ id = $script:claimId; token = $grantToken; url = 'https://edge.example.com/support' } | ConvertTo-Json -Compress
+        $grantJson = @{ id = $script:claimId; token = $grantToken; url = 'https://edge.example.com/connect' } | ConvertTo-Json -Compress
         $session = New-OperatorSession $grantJson $tools
         Assert-OperatorDirectoryPermissions $session.Root
         $originalIdentity = [IO.File]::ReadAllText((Join-Path $session.Root 'identity'))
@@ -201,8 +201,8 @@ public static class RelayFixture {
         Assert-Rejected { New-OperatorSession $grantJson $tools } 'Claim overwrote an existing identity.'
         Assert-True ([IO.File]::ReadAllText((Join-Path $session.Root 'identity')) -ceq $originalIdentity) 'Failed competing claim removed existing identity.'
         # Execute the saved library to ensure source packaging and the adjacent relay are usable.
-        $libraryCheck = ". '" + (Join-Path $session.Root 'support.ps1').Replace("'", "''") + "' -Mode Library; Initialize-OperatorRelay"
-        $libraryResult = [TSuiteSupport.WindowsRelay]::Capture($hostExecutable,
+        $libraryCheck = ". '" + (Join-Path $session.Root 'connect.ps1').Replace("'", "''") + "' -Mode Library; Initialize-OperatorRelay"
+        $libraryResult = [TSuiteConnect.WindowsRelay]::Capture($hostExecutable,
             [string[]]@('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand',
                 [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($libraryCheck))), 20000)
         Assert-True ($libraryResult.ExitCode -eq 0) ('Saved client failed: ' + $libraryResult.Error)

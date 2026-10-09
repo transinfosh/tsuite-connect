@@ -1,7 +1,7 @@
 # 控制服务安装
 
-日常使用直接访问 `192.168.2.52` 上已部署的 TSuite Support：
-[支持管理页面](https://edge.trinfo.net/support/)。现有环境无需再次安装；下述步骤用于新建环境或维护支持服务。
+日常使用直接访问 `192.168.2.52` 上已部署的 TSuite Connect：
+[支持管理页面](https://edge.trinfo.net/connect/)。现有环境无需再次安装；下述步骤用于新建环境或维护支持服务。
 
 从固定版本检出本仓库；以下路径均相对于仓库根目录。不需要安装 `tsuite_deploy`。
 堡垒机及控制服务目前面向 Ubuntu/systemd；日常支持终端可为 Linux 或原生 Windows PowerShell/OpenSSH。
@@ -20,7 +20,7 @@ sudo apt-get install python3 openssh-client sudo curl qrencode iproute2
 2. 在控制服务机器准备受限 broker。Host Key 文件必须通过独立可信渠道核验：
 
 ```bash
-sudo control/prepare-support-access.sh \
+sudo control/prepare-connect-access.sh \
   --bastion-host support.example.com \
   --bastion-host-key-file /secure/path/known_hosts \
   --operator-user adam
@@ -35,11 +35,11 @@ sudo bastion/install-console-bridge.sh \
   --operator-user tsuite-operator
 ```
 
-4. 创建 GitHub OAuth App：Homepage 为 `https://support.example.com/support/`，Callback 为
-`https://support.example.com/support/auth/github/callback`，使用 `read:org` scope。Secret 通过 root-only 文件传入。
+4. 创建 GitHub OAuth App：Homepage 为 `https://connect.example.com/connect/`，Callback 为
+`https://connect.example.com/connect/auth/github/callback`，使用 `read:org` scope。Secret 通过 root-only 文件传入。
 
 ```bash
-sudo control/install-support-console.sh \
+sudo control/install-connect-console.sh \
   --public-host support.example.com \
   --github-client-id YOUR_CLIENT_ID \
   --github-client-secret-file /secure/path/github-client-secret \
@@ -58,14 +58,14 @@ sudo control/install-support-console.sh \
 例如将控制服务回环 8765 映射到堡垒机回环 18765 后，在堡垒机现有支持域名的站点块中添加：
 
 ```caddy
-handle_path /support/* {
+handle_path /connect/* {
     reverse_proxy 127.0.0.1:18765
 }
 ```
 
-默认堡垒机安装器会导入 `/etc/caddy/tsuite-support-console-routes.caddy`，可将上述路由写入该文件。
+默认堡垒机安装器会导入 `/etc/caddy/tsuite-connect-console-routes.caddy`，可将上述路由写入该文件。
 校验 `sudo caddy validate --config /etc/caddy/Caddyfile` 后再 reload Caddy。
-保留 `/tsuite-support/*` 静态接入路由，不得缓存含凭据的响应。公网 `/support/` 未登录应为 401。
+保留 `/tsuite-support/*` 静态接入路由，不得缓存含凭据的响应。公网 `/connect/` 未登录应为 401。
 现有 `tsuite_deploy` 环境继续使用其 FRP/Nginx/Caddy 配置，不需要改端口或路由。
 
 ## 权限兼容

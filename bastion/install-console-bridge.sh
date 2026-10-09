@@ -31,7 +31,7 @@ command -v visudo >/dev/null 2>&1 || die "缺少 visudo"
 
 operator_group="$(id -gn "$OPERATOR_USER")"
 install -d -m 0750 -o root -g "$operator_group" /etc/tsuite-support-console
-install -m 0755 -o root -g root "$SCRIPT_DIR/tsuite_support_console_action.py" \
+install -m 0755 -o root -g root "$SCRIPT_DIR/tsuite_connect_console_action.py" \
 	/usr/local/sbin/tsuite-support-console-action
 install -m 0755 -o root -g root "$SCRIPT_DIR/tsuite-support-operator-shell" \
 	/usr/local/sbin/tsuite-support-operator-shell

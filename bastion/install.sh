@@ -81,7 +81,7 @@ require_integer "端口范围起点" "$PORT_START" 1024 65535
 require_integer "端口范围终点" "$PORT_END" "$PORT_START" 65535
 require_integer "会话码有效期" "$TOKEN_TTL_SECONDS" 60 3600
 require_integer "会话有效期" "$SESSION_TTL_SECONDS" 300 28800
-[[ -f "$SCRIPT_DIR/tsuite_support_session.py" ]] || die "缺少 tsuite_support_session.py"
+[[ -f "$SCRIPT_DIR/tsuite_connect_session.py" ]] || die "缺少 tsuite_connect_session.py"
 [[ -f "$BOOTSTRAP_SOURCE" ]] || die "缺少客户 bootstrap.sh"
 for windows_script in bootstrap.ps1 windows-client.ps1; do
 	[[ -f "$SCRIPT_DIR/../customer/$windows_script" ]] || die "缺少客户 $windows_script"
@@ -113,7 +113,7 @@ install -d -m 2770 -o "$ENROLL_USER" -g "$ENROLL_USER" "$STATE_DIR" "$STATE_DIR/
 install -d -m 2750 -o root -g caddy "$DOWNLOADS_DIR"
 install -d -m 2750 -o root -g caddy "$DOWNLOADS_DIR/assets"
 install -d -m 0711 -o root -g root "$AUTHORIZED_KEYS_DIR"
-install -m 0755 "$SCRIPT_DIR/tsuite_support_session.py" "$INSTALL_ROOT/tsuite-support-session"
+install -m 0755 "$SCRIPT_DIR/tsuite_connect_session.py" "$INSTALL_ROOT/tsuite-support-session"
 install -m 0755 "$BOOTSTRAP_SOURCE" "$INSTALL_ROOT/bootstrap.sh"
 install -m 0644 "$SCRIPT_DIR/../customer/linux-client.py" "$INSTALL_ROOT/linux-client.py"
 install -m 0644 "$SCRIPT_DIR/../customer/bootstrap.ps1" "$SCRIPT_DIR/../customer/windows-client.ps1" "$INSTALL_ROOT/"
@@ -228,8 +228,8 @@ EOF
 chmod 0644 "$caddy_snippet"
 if [[ ! -s "$caddy_console_routes" ]]; then
 	cat >"$caddy_console_routes" <<'EOF'
-@tsuite_support_console_disabled path /__tsuite-support-console-disabled__
-respond @tsuite_support_console_disabled 404
+@tsuite_connect_console_disabled path /__tsuite-support-console-disabled__
+respond @tsuite_connect_console_disabled 404
 EOF
 	chmod 0644 "$caddy_console_routes"
 fi

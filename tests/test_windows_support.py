@@ -204,7 +204,7 @@ class WindowsConsoleTest(unittest.TestCase):
 	def test_customer_platform_is_selected_after_creation_and_then_sent_to_broker(self):
 		app = console.CONSOLE.Application(self.settings)
 		session_id, csrf = app.store.new_session('alice', 'Alice')
-		cookie = f'tsuite_support_session={session_id}'
+		cookie = f'tsuite_connect_session={session_id}'
 		created = {'id': '012345abcdef', 'token': 'secret', 'platform': 'linux', 'customer_command': 'linux-command',
 			'operator_claim_token': 'A' * 43}
 		configured = {'id': '012345abcdef', 'platform': 'windows', 'customer_command': 'powershell.exe test'}

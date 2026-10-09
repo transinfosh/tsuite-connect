@@ -3,11 +3,11 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CONFIG_DIR="/etc/tsuite-support-control"
-STATE_DIR="/var/lib/tsuite-support-operator"
-BROKER_USER="tsuite-support-operator"
-BROKER_GROUP="tsuite-support-operator"
-CONSOLE_USER="tsuite-support-console"
+CONFIG_DIR="/etc/tsuite-connect-control"
+STATE_DIR="/var/lib/tsuite-connect-operator"
+BROKER_USER="tsuite-connect-operator"
+BROKER_GROUP="tsuite-connect-operator"
+CONSOLE_USER="tsuite-connect-console"
 BASTION_HOST="edge.trinfo.net"
 BASTION_PORT="22"
 BASTION_USER="tsuite-operator"
@@ -22,7 +22,7 @@ die() {
 
 usage() {
 	cat <<'EOF'
-用法: sudo ./prepare-support-access.sh --bastion-host-key-file FILE [选项]
+用法: sudo ./prepare-connect-access.sh --bastion-host-key-file FILE [选项]
 
 必填：
   --bastion-host-key-file FILE  已通过独立渠道核验的堡垒机 SSH Host Key 或 known_hosts
@@ -59,7 +59,7 @@ fi
 [[ "$BASTION_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "堡垒机用户无效"
 [[ "$OPERATOR_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "控制机运维用户无效"
 id "$OPERATOR_USER" >/dev/null 2>&1 || die "控制机运维用户不存在: $OPERATOR_USER"
-[[ -f "$REPO_ROOT/console/tsuite_support_remote_action.py" ]] || die "缺少控制机 broker 程序"
+[[ -f "$REPO_ROOT/console/tsuite_connect_remote_action.py" ]] || die "缺少控制机 broker 程序"
 for command_name in getent gpasswd groupadd install python3 ssh-keygen systemctl useradd usermod visudo; do
 	command -v "$command_name" >/dev/null 2>&1 || die "缺少命令: $command_name"
 done
@@ -87,9 +87,9 @@ remove_broker_membership "$CONSOLE_USER"
 install -d -m 0750 -o root -g "$BROKER_GROUP" "$CONFIG_DIR"
 install -d -m 0700 -o "$BROKER_USER" -g "$BROKER_GROUP" "$STATE_DIR" "$STATE_DIR/sessions"
 install -m 0755 -o root -g root \
-	"$REPO_ROOT/console/tsuite_support_remote_action.py" \
-	/usr/local/bin/tsuite-support-console-action
-install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_support_activity.py" /usr/local/bin/tsuite_support_activity.py
+	"$REPO_ROOT/console/tsuite_connect_remote_action.py" \
+	/usr/local/bin/tsuite-connect-console-action
+install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_connect_activity.py" /usr/local/bin/tsuite_connect_activity.py
 
 migrate_or_generate_key() {
 	local name legacy target
@@ -112,8 +112,8 @@ migrate_or_generate_key() {
 	chmod 0644 "$target.pub"
 }
 
-migrate_or_generate_key bridge_ed25519 /etc/tsuite-support-console/bridge_ed25519
-migrate_or_generate_key edge_operator_ed25519 /etc/tsuite-support-console/edge_operator_ed25519
+migrate_or_generate_key bridge_ed25519 /etc/tsuite-connect-console/bridge_ed25519
+migrate_or_generate_key edge_operator_ed25519 /etc/tsuite-connect-console/edge_operator_ed25519
 
 host_key="$(awk 'NF >= 2 && $1 !~ /^#/ {if ($1 ~ /^ssh-/) print $1, $2; else print $2, $3; exit}' "$BASTION_HOST_KEY_FILE")"
 [[ "$host_key" == ssh-ed25519\ * || "$host_key" == ecdsa-sha2-nistp256\ * ]] || die "无法读取堡垒机 Host Key"
@@ -155,15 +155,15 @@ PY
 chown root:"$BROKER_GROUP" "$CONFIG_DIR/action.json"
 
 # 保留既有 sudoers 文件名及别名，原地升级时避免重复定义。
-control_services="/usr/bin/systemctl restart tsuite-support-console.service"
+control_services="/usr/bin/systemctl restart tsuite-connect-console.service"
 if [[ "$DEPLOYMENT_SERVICE_PERMISSIONS" == true ]]; then
 	control_services+=", /usr/bin/systemctl restart nginx.service, /usr/bin/systemctl restart tsuite-frpc.service, /usr/bin/systemctl restart tsuite-github-egress.service"
 fi
 sudoers_temporary="$(mktemp /etc/sudoers.d/.tsuite-deploy-operator.XXXXXX)"
 trap 'unlink "$sudoers_temporary" 2>/dev/null || true' EXIT
 cat >"$sudoers_temporary" <<EOF
-Cmnd_Alias TSUITE_SUPPORT_WEB = /usr/local/bin/tsuite-support-console-action create *, /usr/local/bin/tsuite-support-console-action set-platform *, /usr/local/bin/tsuite-support-console-action show *, /usr/local/bin/tsuite-support-console-action list, /usr/local/bin/tsuite-support-console-action close *, /usr/local/bin/tsuite-support-console-action claim
-Cmnd_Alias TSUITE_SUPPORT_OPERATOR = /usr/local/bin/tsuite-support-console-action show *, /usr/local/bin/tsuite-support-console-action list, /usr/local/bin/tsuite-support-console-action close *, /usr/local/bin/tsuite-support-console-action force-close *, /usr/local/bin/tsuite-support-console-action ssh *, /usr/local/bin/tsuite-support-console-action run *
+Cmnd_Alias TSUITE_SUPPORT_WEB = /usr/local/bin/tsuite-connect-console-action create *, /usr/local/bin/tsuite-connect-console-action set-platform *, /usr/local/bin/tsuite-connect-console-action show *, /usr/local/bin/tsuite-connect-console-action list, /usr/local/bin/tsuite-connect-console-action close *, /usr/local/bin/tsuite-connect-console-action claim
+Cmnd_Alias TSUITE_SUPPORT_OPERATOR = /usr/local/bin/tsuite-connect-console-action show *, /usr/local/bin/tsuite-connect-console-action list, /usr/local/bin/tsuite-connect-console-action close *, /usr/local/bin/tsuite-connect-console-action force-close *, /usr/local/bin/tsuite-connect-console-action ssh *, /usr/local/bin/tsuite-connect-console-action run *
 Cmnd_Alias TSUITE_CONTROL_SERVICES = $control_services
 $CONSOLE_USER ALL=($BROKER_USER) NOPASSWD: TSUITE_SUPPORT_WEB
 $OPERATOR_USER ALL=($BROKER_USER) NOPASSWD: TSUITE_SUPPORT_OPERATOR
@@ -176,7 +176,7 @@ unlink "$sudoers_temporary"
 trap - EXIT
 visudo -c >/dev/null || die "完整 sudoers 配置校验失败"
 
-cat >/etc/systemd/system/tsuite-support-operator-gc.service <<EOF
+cat >/etc/systemd/system/tsuite-connect-operator-gc.service <<EOF
 [Unit]
 Description=Garbage collect TSuite per-session operator keys
 After=network-online.target
@@ -186,7 +186,7 @@ Wants=network-online.target
 Type=oneshot
 User=$BROKER_USER
 Group=$BROKER_GROUP
-ExecStart=/usr/local/bin/tsuite-support-console-action gc
+ExecStart=/usr/local/bin/tsuite-connect-console-action gc
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectSystem=strict
@@ -204,7 +204,7 @@ ReadOnlyPaths=$CONFIG_DIR
 ReadWritePaths=$STATE_DIR
 EOF
 
-cat >/etc/systemd/system/tsuite-support-operator-gc.timer <<'EOF'
+cat >/etc/systemd/system/tsuite-connect-operator-gc.timer <<'EOF'
 [Unit]
 Description=Garbage collect TSuite per-session operator keys periodically
 
@@ -218,7 +218,7 @@ WantedBy=timers.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now tsuite-support-operator-gc.timer
+systemctl enable --now tsuite-connect-operator-gc.timer
 
 printf '控制机支持 broker 已准备完成。\n'
 printf '桥接公钥：%s\n' "$CONFIG_DIR/bridge_ed25519.pub"

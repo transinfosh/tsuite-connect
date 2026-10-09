@@ -10,7 +10,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ($PSCommandPath -and -not (Get-Variable -Name ClientSource -Scope Script -ErrorAction SilentlyContinue)) {
     $script:ClientSource = [IO.File]::ReadAllText($PSCommandPath)
-    $script:RelaySource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'tsuite_support_windows_relay.cs'))
+    $script:RelaySource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'tsuite_connect_windows_relay.cs'))
 }
 
 function Assert-OperatorId([string]$Value) {
@@ -29,7 +29,7 @@ function Get-OperatorTime { return [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() 
 function Get-OperatorUserSid { return [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
 
 function Get-OperatorParent {
-    return (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'TSuiteSupport/portable')
+    return (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'TSuiteConnect/portable')
 }
 
 function Assert-OperatorPath([string]$Path) {
@@ -100,18 +100,18 @@ function Save-OperatorLease([string]$Root, $Settings) {
     $temporary = Join-Path $Root ('session-' + [guid]::NewGuid().ToString('N') + '.tmp')
     try {
         Write-OperatorFile $temporary ($Settings | ConvertTo-Json -Compress)
-        [TSuiteSupport.WindowsRelay]::ReplaceFile($temporary, (Join-Path $Root 'session.json'))
+        [TSuiteConnect.WindowsRelay]::ReplaceFile($temporary, (Join-Path $Root 'session.json'))
     } finally {
         if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
     }
 }
 
 function Initialize-OperatorRelay {
-    if ('TSuiteSupport.WindowsRelay' -as [type]) { return }
+    if ('TSuiteConnect.WindowsRelay' -as [type]) { return }
     if (Get-Variable -Name RelaySource -Scope Script -ErrorAction SilentlyContinue) {
         $source = $script:RelaySource
     } else {
-        $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'tsuite_support_windows_relay.cs'))
+        $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'tsuite_connect_windows_relay.cs'))
     }
     Add-Type -TypeDefinition $source
 }
@@ -129,7 +129,7 @@ function Request-OperatorClaim($Grant, [string]$PublicKey) {
     $uri = $null
     if (-not [uri]::TryCreate([string](Get-OperatorProperty $Grant 'url'), [UriKind]::Absolute, [ref]$uri) -or
         $uri.Scheme -ne 'https' -or -not $uri.Host -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or
-        $uri.AbsolutePath -cne '/support') { throw 'Invalid authorization URL.' }
+        (@('/connect', '/support') -cnotcontains $uri.AbsolutePath)) { throw 'Invalid authorization URL.' }
     $request = [Net.HttpWebRequest]::Create($uri.AbsoluteUri + '/operator-claim')
     $request.Method = 'POST'
     $request.ContentType = 'application/json'
@@ -221,7 +221,7 @@ Host tsuite-edge
 
 function Get-OperatorStatus([string]$Root, $Settings, $Tools) {
     $arguments = @((Get-OperatorEdgeArguments $Root $Settings)) + @('show', $Settings.id)
-    $result = [TSuiteSupport.WindowsRelay]::Capture($Tools.Ssh, [string[]]$arguments, 20000)
+    $result = [TSuiteConnect.WindowsRelay]::Capture($Tools.Ssh, [string[]]$arguments, 20000)
     if ($result.ExitCode -ne 0) {
         if ($result.Error.Contains('Permission denied (publickey')) {
             throw [UnauthorizedAccessException]::new('Session authorization was revoked or expired.')
@@ -259,7 +259,7 @@ function Get-OperatorCustomerArguments([string]$Root, $Settings, $Remote, $Tools
         if ([IO.File]::ReadAllText($hosts) -cne $hostLine) { throw 'Customer host key changed. Connection refused.' }
     } else { Write-OperatorFile $hosts $hostLine }
     $edge = @((Get-OperatorEdgeArguments $Root $Settings)) + @('proxy', $Settings.id)
-    $proxy = [TSuiteSupport.WindowsRelay]::Quote($Tools.Ssh) + ' ' + [TSuiteSupport.WindowsRelay]::Arguments([string[]]$edge)
+    $proxy = [TSuiteConnect.WindowsRelay]::Quote($Tools.Ssh) + ' ' + [TSuiteConnect.WindowsRelay]::Arguments([string[]]$edge)
     $path = $hosts.Replace('\', '/')
     return @((Get-OperatorSshOptions $Root)) + @('-o', "UserKnownHostsFile=`"$path`"", '-o', "ProxyCommand=$proxy",
         '-p', [string]$Remote.remote_port, "tsuite-ops-$($Settings.id.Substring(0, 8))@127.0.0.1")
@@ -292,7 +292,7 @@ function Remove-OperatorSession([string]$Root) {
 
 function Watch-OperatorSession([string]$Root, $Settings, $Tools) {
     $user = Get-OperatorUserSid
-    $mutex = New-Object Threading.Mutex($false, "Local\TSuiteSupportOperatorWatch-$user-$($Settings.id)")
+    $mutex = New-Object Threading.Mutex($false, "Local\TSuiteConnectOperatorWatch-$user-$($Settings.id)")
     $acquired = $false
     try {
         try { $acquired = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $acquired = $true }
@@ -318,10 +318,10 @@ function Watch-OperatorSession([string]$Root, $Settings, $Tools) {
 
 function Start-OperatorWatcher([string]$Root) {
     $executable = Join-Path $PSHOME $(if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' })
-    $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $Root 'support.ps1'), '-Mode', 'Watch')
+    $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $Root 'connect.ps1'), '-Mode', 'Watch')
     $start = New-Object Diagnostics.ProcessStartInfo
     $start.FileName = $executable
-    $start.Arguments = [TSuiteSupport.WindowsRelay]::Arguments([string[]]$arguments)
+    $start.Arguments = [TSuiteConnect.WindowsRelay]::Arguments([string[]]$arguments)
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $process = [Diagnostics.Process]::Start($start)
@@ -341,7 +341,7 @@ function New-OperatorSession([string]$Json, $Tools) {
     }
     $root = Join-Path $parent $grant.id
     $user = Get-OperatorUserSid
-    $mutex = New-Object Threading.Mutex($false, "Local\TSuiteSupportOperatorClaim-$user-$($grant.id)")
+    $mutex = New-Object Threading.Mutex($false, "Local\TSuiteConnectOperatorClaim-$user-$($grant.id)")
     $acquired = $false
     $created = $false
     try {
@@ -349,10 +349,10 @@ function New-OperatorSession([string]$Json, $Tools) {
         if (-not $acquired) { throw 'Another process is claiming this session.' }
         Assert-OperatorPath $root
         if (Test-Path -LiteralPath $root) { throw 'This session directory already exists. Use its -Mode Resume command.' }
-        [TSuiteSupport.WindowsRelay]::CreateSessionDirectory($root)
+        [TSuiteConnect.WindowsRelay]::CreateSessionDirectory($root)
         $created = $true
         Set-OperatorDirectoryPermissions $root
-        $result = [TSuiteSupport.WindowsRelay]::Capture($Tools.Keygen,
+        $result = [TSuiteConnect.WindowsRelay]::Capture($Tools.Keygen,
             [string[]]@('-q', '-t', 'ed25519', '-N', '', '-f', (Join-Path $root 'identity')), 20000)
         if ($result.ExitCode -ne 0) { throw 'Unable to generate the local SSH identity.' }
         # Win32 keygen may install explicit SYSTEM/Administrators grants; normalize them too.
@@ -372,10 +372,10 @@ function New-OperatorSession([string]$Json, $Tools) {
             $relay = $script:RelaySource
         } else {
             $source = [IO.File]::ReadAllText($PSCommandPath)
-            $relay = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'tsuite_support_windows_relay.cs'))
+            $relay = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'tsuite_connect_windows_relay.cs'))
         }
-        Write-OperatorFile (Join-Path $root 'support.ps1') $source
-        Write-OperatorFile (Join-Path $root 'tsuite_support_windows_relay.cs') $relay
+        Write-OperatorFile (Join-Path $root 'connect.ps1') $source
+        Write-OperatorFile (Join-Path $root 'tsuite_connect_windows_relay.cs') $relay
         Assert-OperatorDirectoryPermissions $root
         return [pscustomobject]@{ Root = $root; Settings = $settings }
     } catch {
@@ -405,7 +405,7 @@ function Invoke-OperatorMain {
             $root = $session.Root
             $settings = $session.Settings
             [Console]::Error.WriteLine("Authorization claimed. Reconnect using:`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File '" +
-                (Join-Path $root 'support.ps1').Replace("'", "''") + "' -Mode Resume`nFor AI, append: -Command 'hostname'")
+                (Join-Path $root 'connect.ps1').Replace("'", "''") + "' -Mode Resume`nFor AI, append: -Command 'hostname'")
         } else {
             $root = $PSScriptRoot
             Assert-OperatorDirectoryPermissions $root
@@ -421,10 +421,10 @@ function Invoke-OperatorMain {
         $activity = [string[]](@('-T') + $base + @(Get-OperatorActivityCommand $remote.platform $settings.id))
         if ($Command) {
             $arguments = [string[]](@('-T') + $base + @(ConvertTo-OperatorRemoteCommand $remote.platform $Command))
-            return [TSuiteSupport.WindowsRelay]::RunCommand($tools.Ssh, $arguments, $activity,
+            return [TSuiteConnect.WindowsRelay]::RunCommand($tools.Ssh, $arguments, $activity,
                 [Console]::OpenStandardInput(), [Console]::OpenStandardOutput(), [Console]::OpenStandardError())
         }
-        return [TSuiteSupport.WindowsRelay]::RunTerminal($tools.Ssh, [string[]](@('-tt') + $base), $activity)
+        return [TSuiteConnect.WindowsRelay]::RunTerminal($tools.Ssh, [string[]](@('-tt') + $base), $activity)
     } catch [UnauthorizedAccessException] {
         if ($root) { Remove-OperatorSession $root }
         throw

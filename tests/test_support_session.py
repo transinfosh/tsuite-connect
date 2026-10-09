@@ -10,7 +10,7 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
-	"tsuite_support_session", ROOT / "bastion" / "tsuite_support_session.py"
+	"tsuite_connect_session", ROOT / "bastion" / "tsuite_connect_session.py"
 )
 SUPPORT = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -212,7 +212,7 @@ class StaticSecurityTest(unittest.TestCase):
 		self.assertNotIn('本机已有支持会话，请先关闭后再创建新会话', bootstrap)
 
 	def test_tunnel_key_and_sshd_are_loopback_only(self):
-		server = (ROOT / "bastion" / "tsuite_support_session.py").read_text(encoding="utf-8")
+		server = (ROOT / "bastion" / "tsuite_connect_session.py").read_text(encoding="utf-8")
 		installer = (ROOT / "bastion" / "install.sh").read_text(encoding="utf-8")
 		self.assertIn('permitlisten="127.0.0.1:', server)
 		self.assertIn("GatewayPorts no", installer)
@@ -232,7 +232,7 @@ class StaticSecurityTest(unittest.TestCase):
 		self.assertNotIn("NOPASSWD: ALL", installer)
 
 	def test_operator_run_preserves_remote_argument_boundaries(self):
-		operator = (ROOT / "operator" / "tsuite-support").read_text(encoding="utf-8")
+		operator = (ROOT / "operator" / "tsuite-connect").read_text(encoding="utf-8")
 		self.assertIn("ssh_args.append(shlex.join(command))", operator)
 		self.assertIn('if command[0] == "--":', operator)
 
@@ -242,14 +242,14 @@ class StaticSecurityTest(unittest.TestCase):
 
 	def test_console_is_restricted_to_local_caddy_proxy_and_fixed_actions(self):
 		installer = (ROOT / "bastion" / "install-console.sh").read_text(encoding="utf-8")
-		control_installer = (ROOT / "control" / "install-support-console.sh").read_text(encoding="utf-8")
-		prepare = (ROOT / "control" / "prepare-support-access.sh").read_text(encoding="utf-8")
+		control_installer = (ROOT / "control" / "install-connect-console.sh").read_text(encoding="utf-8")
+		prepare = (ROOT / "control" / "prepare-connect-access.sh").read_text(encoding="utf-8")
 		self.assertIn("堡垒机同机支持页面已停用", installer)
 		self.assertIn("ProtectSystem=strict", control_installer)
 		self.assertNotIn("SupplementaryGroups=tsuite-deploy", control_installer)
 		self.assertNotIn("CapabilityBoundingSet=", control_installer)
 		self.assertIn('ReadWritePaths=$STATE_DIR $BROKER_STATE_DIR', control_installer)
-		self.assertIn('ExecStartPre=/usr/bin/sudo -n -u $BROKER_USER /usr/local/bin/tsuite-support-console-action list', control_installer)
+		self.assertIn('ExecStartPre=/usr/bin/sudo -n -u $BROKER_USER /usr/local/bin/tsuite-connect-console-action list', control_installer)
 		self.assertIn('首次安装必须提供 --github-client-secret-file', control_installer)
 		self.assertIn('existing.get("github_client_secret", "")', control_installer)
 		self.assertIn("TSUITE_SUPPORT_WEB", prepare)

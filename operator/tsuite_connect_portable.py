@@ -19,7 +19,7 @@ import urllib.request
 # The console embeds both sources; filesystem execution uses the adjacent module.
 CLIENT_SOURCE = globals().get("CLIENT_SOURCE") or pathlib.Path(__file__).read_text(encoding="utf-8")
 ACTIVITY_SOURCE = globals().get("ACTIVITY_SOURCE") or pathlib.Path(__file__).with_name(
-    "tsuite_support_activity.py"
+    "tsuite_connect_activity.py"
 ).read_text(encoding="utf-8")
 
 SESSION_RE = re.compile(r"[a-f0-9]{12}")
@@ -60,7 +60,7 @@ def claim(grant, public_key):
         or url.password
         or url.query
         or url.fragment
-        or url.path != "/support"
+        or url.path not in ("/connect", "/support")
     ):
         raise ValueError("Invalid authorization URL")
     body = json.dumps({"id": grant["id"], "token": grant["token"], "public_key": public_key}).encode()
@@ -241,7 +241,7 @@ def connect(root, settings, remote, command):
                 command.encode("utf-16-le")
             ).decode("ascii")
         arguments.append(command)
-    activity = types.ModuleType("tsuite_support_activity")
+    activity = types.ModuleType("tsuite_connect_activity")
     exec(ACTIVITY_SOURCE, activity.__dict__)
     environment = os.environ.copy()
     environment["SHELL"] = "/bin/sh"
@@ -272,7 +272,7 @@ def main():
             raise ValueError("Invalid session ID")
         parent = (
             pathlib.Path(os.environ.get("XDG_CONFIG_HOME", pathlib.Path.home() / ".config"))
-            / "tsuite-support/portable"
+            / "tsuite-connect/portable"
         )
         parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         root = parent / grant["id"]
@@ -289,7 +289,7 @@ def main():
             write_private(root / "edge_known_hosts", settings.pop("known_hosts"))
             write_private(root / "session.json", json.dumps(settings))
             write_private(
-                root / "support.py",
+                root / "connect.py",
                 "CLIENT_SOURCE = "
                 + repr(CLIENT_SOURCE)
                 + "\nACTIVITY_SOURCE = "
@@ -303,11 +303,11 @@ def main():
         grant.clear()
         command = sys.argv[2] if len(sys.argv) == 3 else None
         print(
-            "授权已领取。再次连接命令：\n" + shlex.join(["python3", str(root / "support.py"), "--resume"]),
+            "授权已领取。再次连接命令：\n" + shlex.join(["python3", str(root / "connect.py"), "--resume"]),
             file=sys.stderr,
         )
     subprocess.Popen(
-        ["python3", str(root / "support.py"), "--watch"],
+        ["python3", str(root / "connect.py"), "--watch"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

@@ -39,7 +39,7 @@ jobs:
 
       - name: Check Python and shell syntax
         run: |
-          python3 -m py_compile bastion/*.py console/*.py operator/tsuite-support operator/*.py customer/*.py
+          python3 -m py_compile bastion/*.py console/*.py operator/tsuite-connect operator/*.py customer/*.py
           for script in control/*.sh bastion/*.sh customer/*.sh operator/*.sh; do bash -n "$script"; done
 
       - name: Run support-session tests

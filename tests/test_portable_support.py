@@ -27,7 +27,7 @@ SUPPORT = sessions.SUPPORT
 CONSOLE = console.CONSOLE
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
-    "portable_support", ROOT / "operator/tsuite_support_portable.py"
+    "portable_support", ROOT / "operator/tsuite_connect_portable.py"
 )
 PORTABLE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PORTABLE)
@@ -194,7 +194,7 @@ class PortableTrustTest(unittest.TestCase):
         home = pathlib.Path(self.temporary.name) / "operator-home"
         (home / ".ssh").mkdir(parents=True)
         keys = home / ".ssh/authorized_keys"
-        bridge = "restrict ssh-ed25519 AAAA tsuite-support-console-bridge\n"
+        bridge = "restrict ssh-ed25519 AAAA tsuite-connect-console-bridge\n"
         keys.write_text(bridge)
         account = types.SimpleNamespace(pw_dir=str(home), pw_uid=os.getuid(), pw_gid=os.getgid())
         with mock.patch.object(SUPPORT.pwd, "getpwnam", return_value=account):
@@ -245,7 +245,7 @@ class PortableConsoleTest(unittest.TestCase):
         body = f"customer=customer-one&csrf={csrf}"
         with mock.patch.object(CONSOLE, "manager", side_effect=[json.dumps(created), json.dumps({"platform": "linux"})]) as broker:
             captured, content = self.call(app, "/session", "POST", body,
-                cookie="tsuite_support_session=" + session_id)
+                cookie="tsuite_connect_session=" + session_id)
             self.assertTrue(captured["status"].startswith("200"))
             self.assertIn("支持机执行命令（Linux 终端）", content)
             self.assertIn("linux-customer-command", content)
@@ -255,7 +255,7 @@ class PortableConsoleTest(unittest.TestCase):
                 "operator_platform": "windows", "grant": grant, "platform": "linux",
                 "current_platform": "linux", "customer_command": "linux-customer-command"})
             captured, content = self.call(app, "/session/012345abcdef/platform", "POST", switch_body,
-                cookie="tsuite_support_session=" + session_id)
+                cookie="tsuite_connect_session=" + session_id)
         self.assertTrue(captured["status"].startswith("200"))
         self.assertIn("支持机执行命令（Windows PowerShell）", content)
         self.assertIn("operator-client.ps1", content)
@@ -279,7 +279,7 @@ class PortableConsoleTest(unittest.TestCase):
         with mock.patch.object(CONSOLE, "manager") as broker:
             captured, _ = self.call(
                 app, "/session/012345abcdef/platform", "POST", body,
-                cookie="tsuite_support_session=" + session_id,
+                cookie="tsuite_connect_session=" + session_id,
             )
         self.assertTrue(captured["status"].startswith("400"))
         broker.assert_not_called()
@@ -298,7 +298,7 @@ class PortableConsoleTest(unittest.TestCase):
                     configured = {"id": "012345abcdef", "platform": platform,
                         "customer_command": "customer-command"}
                     body = urllib.parse.urlencode({"customer": "customer-one", "purpose": purpose, "csrf": csrf})
-                    cookie = "tsuite_support_session=" + session_id
+                    cookie = "tsuite_connect_session=" + session_id
                     side_effect = [json.dumps(created | default), json.dumps({"platform": "linux"})]
                     if platform != "linux":
                         side_effect.append(json.dumps(configured))
@@ -356,7 +356,7 @@ class PortableConsoleTest(unittest.TestCase):
             "id": "012345abcdef", "platform": "windows", "status": "enrolled",
         })) as broker:
             captured, content = self.call(app, "/session/012345abcdef/platform", "POST", body,
-                f"tsuite_support_session={session_id}")
+                f"tsuite_connect_session={session_id}")
         self.assertTrue(captured["status"].startswith("200"))
         self.assertIn("支持机执行命令（Windows PowerShell）", content)
         self.assertIn("operator-client.ps1", content)
@@ -371,7 +371,7 @@ class PortableConsoleTest(unittest.TestCase):
         body = "customer=customer-one&purpose=&csrf=" + csrf
         with mock.patch.object(CONSOLE, "manager", return_value=json.dumps(created)) as broker:
             captured, content = self.call(app, "/session", "POST", body,
-                cookie="tsuite_support_session=" + session_id)
+                cookie="tsuite_connect_session=" + session_id)
         self.assertTrue(captured["status"].startswith("200"))
         self.assertIn('id="operator-command"', content)
         self.assertIn('id="customer-command"', content)
@@ -388,7 +388,7 @@ class PortableConsoleTest(unittest.TestCase):
         self.assertIn('data-os-icon="linux-penguin"', content)
         self.assertIn('data-os-icon="windows-logo"', content)
         self.assertIn('fill="#facc15"', content)
-        self.assertIn('action="/support/session/012345abcdef/platform"', content)
+        self.assertIn('action="/connect/session/012345abcdef/platform"', content)
         self.assertEqual(broker.call_args_list[0].args, ("create", "customer-one", "--created-by", "alice", "--purpose", "", "--platform", "linux"))
         self.assertEqual(broker.call_count, 1)
         self.assertIn(("Cache-Control", "no-store"), captured["headers"])
@@ -471,7 +471,7 @@ class PortableCommandTest(unittest.TestCase):
             stdin = io.TextIOWrapper(io.BytesIO(json.dumps(grant).encode()))
             with (
                 mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": temporary}),
-                mock.patch.object(PORTABLE.sys, "argv", ["support.py", "--command", "hostname"]),
+                mock.patch.object(PORTABLE.sys, "argv", ["connect.py", "--command", "hostname"]),
                 mock.patch.object(PORTABLE.sys, "stdin", stdin),
                 mock.patch.object(PORTABLE, "claim", return_value=claimed),
                 mock.patch.object(PORTABLE, "wait_for_customer", return_value={"platform": "linux"}),
@@ -481,7 +481,7 @@ class PortableCommandTest(unittest.TestCase):
             ):
                 self.assertEqual(PORTABLE.main(), 7)
             self.assertEqual(connect.call_args.args[-1], "hostname")
-            saved = pathlib.Path(temporary) / "tsuite-support/portable/012345abcdef"
+            saved = pathlib.Path(temporary) / "tsuite-connect/portable/012345abcdef"
             self.assertNotIn(grant["token"], (saved / "session.json").read_text())
             stdin.close()
 

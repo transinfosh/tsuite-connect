@@ -1,19 +1,19 @@
-# TSuite Support
+# TSuite Connect
 
-`tsuite-support` 用于客户服务器无法被公司网络直接访问时，建立短时、可审计边界清晰的
+`tsuite-connect` 用于客户服务器无法被公司网络直接访问时，建立短时、可审计边界清晰的
 SSH 反向隧道。客户只需执行一条由公司 CLI 生成的命令，无需另外输入会话码，后续操作由
 公司运维人员通过堡垒机完成。
 
 这是独立仓库，不依赖 Frappe、Bench、Ansible、Docker 或 `tsuite_deploy`。运行时使用系统 Python 标准库、OpenSSH、systemd；HTTPS 入口使用 Caddy，控制台还需要 qrencode。不会接管或修改现有 FRP 服务。FRP 与本模块可以
 在同一堡垒机共存；两者不共用端口、Token、用户或配置文件。
 
-仓库地址：[transinfosh/tsuite-support](https://github.com/transinfosh/tsuite-support)。
+仓库地址：[transinfosh/tsuite-connect](https://github.com/transinfosh/tsuite-connect)。
 首次安装见[控制服务安装](control/README.md)，升级与发布见[运维手册](docs/operations.md)，原仓库迁移边界见[拆分记录](docs/migration.md)。
 
 ## 使用现有服务
 
-日常远程支持与业务部署直接使用 `192.168.2.52` 上已部署的 TSuite Support，
-入口为[支持管理页面](https://edge.trinfo.net/support/)。
+日常远程支持与业务部署直接使用 `192.168.2.52` 上已部署的 TSuite Connect，
+入口为[支持管理页面](https://edge.trinfo.net/connect/)。
 
 登录页面创建会话，将客户执行命令交给客户，在支持机执行支持端命令；
 两端操作系统可在命令页分别选择。交给 AI 时复制页面的操作说明，并在末尾补充任务。
@@ -70,8 +70,8 @@ reload 失败时自动恢复旧配置。
 `transinfosh`），可选择进一步限制到某个团队。页面只提供创建、查看和关闭会话；服务账户通过
 固定参数的受限桥接程序调用会话管理器，不能执行任意 Shell 或 SSH 命令。
 
-先在 GitHub 中创建一个 OAuth App：Homepage URL 为 `https://edge.trinfo.net/support/`，
-Authorization callback URL 为 `https://edge.trinfo.net/support/auth/github/callback`。应用需要
+先在 GitHub 中创建一个 OAuth App：Homepage URL 为 `https://edge.trinfo.net/connect/`，
+Authorization callback URL 为 `https://edge.trinfo.net/connect/auth/github/callback`。应用需要
 请求 `read:org` scope。Client Secret 只在部署控制机安装时通过隐藏输入或 root-only 文件提供，绝不
 提交到仓库、粘贴到聊天或放入命令行参数。
 
@@ -104,8 +104,8 @@ Windows 支持机首次命令带 `-Command 'hostname'`，Linux 支持机首次�
 客户机系统生成。未填写支持用途时，说明保留具体任务占位符。AI 说明含一次性授权，与接入命令一样
 只在会话命令页显示，不保存到页面历史、会话详情或后台状态。再次连接使用工具输出的实际脚本路径。
 
-授权请求经 `https://edge.trinfo.net/support/operator-claim` 转到控制机；终端输入输出直接经
-Edge 的受限 SSH 代理到客户，不经过控制机。公开 `/support/operator-client` 只提供通用程序，
+授权请求经 `https://edge.trinfo.net/connect/operator-claim` 转到控制机；终端输入输出直接经
+Edge 的受限 SSH 代理到客户，不经过控制机。公开 `/connect/operator-client` 只提供通用程序，
 不包含会话秘密。支持命令中的 256-bit 随机授权通过标准输入交给程序，并作为 HTTPS POST
 正文提交；不出现在 URL、客户端 Python 进程参数或普通服务日志中。完整支持命令仍是临时
 密码，会留在执行者的 Shell 历史中，不可公开或转交未授权人员。
@@ -126,9 +126,9 @@ principal，并强制执行该会话的 show/proxy，禁止 Shell、任意端口
 本机连接程序会显示再次连接命令，例如：
 
 ```bash
-python3 ~/.config/tsuite-support/portable/SESSION_ID/support.py --resume
+python3 ~/.config/tsuite-connect/portable/SESSION_ID/connect.py --resume
 # 执行一条远端 Shell 命令（Windows 使用 PowerShell 命令）
-python3 ~/.config/tsuite-support/portable/SESSION_ID/support.py --resume 'hostname'
+python3 ~/.config/tsuite-connect/portable/SESSION_ID/connect.py --resume 'hostname'
 ```
 
 本机后台清理程序每 30 秒核对会话状态，确认结束或超过最后确认租约时删除本次会话目录。
@@ -148,11 +148,11 @@ Windows AI 首次执行网页命令时，在末尾追加 `-Command 'hostname'`�
 授权领取后，工具输出本机再次连接命令，例如：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\TSuiteSupport\portable\SESSION_ID\support.ps1" -Mode Resume -Command 'hostname'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\TSuiteConnect\portable\SESSION_ID\connect.ps1" -Mode Resume -Command 'hostname'
 # Linux 客户机命令由远端 Shell 执行；Windows 客户机命令自动编码给 PowerShell。
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\TSuiteSupport\portable\SESSION_ID\support.ps1" -Mode Resume -Command 'Get-Service sshd'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\TSuiteConnect\portable\SESSION_ID\connect.ps1" -Mode Resume -Command 'Get-Service sshd'
 # 人工交互时省略 -Command，需实际 Windows 控制台（非 ISE / 重定向终端）。
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\TSuiteSupport\portable\SESSION_ID\support.ps1" -Mode Resume
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\TSuiteConnect\portable\SESSION_ID\connect.ps1" -Mode Resume
 ```
 
 AI 应使用独立 PowerShell 进程执行再次连接命令，按进程退出码判断成功；标准输出与错误输出分别返回，
@@ -160,7 +160,7 @@ AI 应使用独立 PowerShell 进程执行再次连接命令，按进程退出�
 交互连接使用 Windows ConPTY，转发真实输入、Ctrl+C 和窗口尺寸。输入及发起命令会触发活动上报；
 输出、任务持续运行、SSH keepalive 和后台状态查询均不延长租约。
 
-公开 `/support/operator-client.ps1` 只提供通用 PowerShell 与 C# 终端程序，不包含会话凭据。客户端用
+公开 `/connect/operator-client.ps1` 只提供通用 PowerShell 与 C# 终端程序，不包含会话凭据。客户端用
 HTTPS POST 领取既有会话专属证书，拒绝重定向，并保持 Edge 与客户 Host Key 的严格固定。每会话目录
 仅当前 Windows 用户可访问；私钥不出本机，领取凭据不写入文件或子进程参数。Windows 的支持命令同样
 会进入 PowerShell 历史，不得分享。领取失败且无法恢复证书时，关闭旧会话后新建，不重用授权。
@@ -181,7 +181,7 @@ Windows CI 已纳入此测试。Linux 上 pwsh 可验证语法、配置和命令
 ConPTY、证书经 Edge 登录、持续输入续期与关闭清理验收；发布前仍需完成这些系统集成验证。
 2026-10-09 的完整 Windows CI 已通过，包括原生字节流、带 UTF-8 BOM 的宿主环境、管理员运行时
 凭据所有权、租约清理及两套 OpenSSH 认证测试；100 项 Python 测试与真实 SSH 集成验证也已通过。
-代码版本、部署备份、结果及验证边界见[本次修复验证记录](docs/validation/support-session-review-fixes-20261009.md)。
+代码版本、部署备份、结果及验证边界见[本次修复验证记录](docs/validation/connect-session-review-fixes-20261009.md)。
 具备 sudo 的 Linux 测试机还可运行 `python3 tests/verify_portable_ssh.py --operator-pwsh
 <pwsh路径>`，用两个隔离 sshd 验证 PowerShell/C# 构造的证书连接、Edge 代理与主机密钥拒绝。
 
@@ -212,18 +212,18 @@ Windows 专属 CA 信任和双授权记录续期还需在可丢弃 Windows Serve
 ```bash
 cd operator
 sudo ./install.sh
-tsuite-support configure --bastion company-bastion
+tsuite-connect configure --bastion company-bastion
 ```
 
 `company-bastion` 建议配置在公司电脑的 `~/.ssh/config` 中，并固定堡垒机 Host Key。公司端
-生成的会话私钥只保存在 `~/.config/tsuite-support/sessions/`，关闭会话时删除。
+生成的会话私钥只保存在 `~/.config/tsuite-connect/sessions/`，关闭会话时删除。
 
 ## 日常流程
 
 公司运维创建会话：
 
 ```bash
-tsuite-support create customer-code --purpose "升级 SRM"
+tsuite-connect create customer-code --purpose "升级 SRM"
 ```
 
 命令输出一条 `curl ... | sudo bash` 客户执行语句（Windows 为管理员 PowerShell 命令），无需另输会话码。
@@ -241,15 +241,15 @@ URL 使用 256-bit 随机标识，下载文件禁止缓存，并在登记、关�
 客户完成 enrollment 后，公司端可执行：
 
 ```bash
-tsuite-support status SESSION_ID
-tsuite-support ssh SESSION_ID
-tsuite-support run SESSION_ID -- sudo tsuite-deploy
+tsuite-connect status SESSION_ID
+tsuite-connect ssh SESSION_ID
+tsuite-connect run SESSION_ID -- sudo tsuite-deploy
 ```
 
 完成工作后立即关闭，不必等待自动过期：
 
 ```bash
-tsuite-support close SESSION_ID --closed-by alice
+tsuite-connect close SESSION_ID --closed-by alice
 ```
 
 关闭命令只有在客户机确认清理任务已经调度后，才撤销堡垒机通道并删除公司本地 key；当前 SSH
@@ -257,7 +257,7 @@ tsuite-support close SESSION_ID --closed-by alice
 残留尚未确认，双方的原生 key 过期时间和 timer/GC 仍会兜底。强制关闭必须同时提供原因，例如：
 
 ```bash
-tsuite-support close SESSION_ID --force --closed-by alice \
+tsuite-connect close SESSION_ID --force --closed-by alice \
   --reason "客户服务器已离线；工单记录了待到期回收的本地残留"
 ```
 
@@ -280,7 +280,7 @@ tsuite-support close SESSION_ID --force --closed-by alice \
 - 堡垒机隧道与续期 key、Linux 运维 key、Windows 账号与 key 随租约同步。客户定时清理读取最新期限，后台任务不再有固定两小时/九小时运行限制。
 
 升级需同步安装堡垒机管理器与受限 sudo 配置、Linux/Windows 客户脚本、控制机 broker/页面和公司 CLI，
-新增的 `linux-client.py`、`tsuite_support_activity.py` 必须随安装器一起交付。已接入的旧会话仍按原固定期限关闭，
+新增的 `linux-client.py`、`tsuite_connect_activity.py` 必须随安装器一起交付。已接入的旧会话仍按原固定期限关闭，
 不会远程改写旧客户资源；需要动态续期时关闭后重新创建。旧 `schema_version=1` 的状态与 Linux 码验证路径保留。
 不能只覆盖 manager 文件而遗漏 sudoers：登记/续期 forced-command 需要受限 root 入口更新原生密钥期限。
 
@@ -300,7 +300,7 @@ Compose 容器和旧 volume 必须放在新部署健康检查、站点登录与�
 5.1**，执行页面的一次性命令，无需另输会话码。公司 CLI 同样支持：
 
 ```bash
-tsuite-support create zj-mes --platform windows --purpose "Windows Server 维护"
+tsuite-connect create zj-mes --platform windows --purpose "Windows Server 维护"
 ```
 
 支持范围：Windows Server 2016、2019、2022、2025，以及 Windows 10 build 1809 或更新版本和 Windows 11。
@@ -345,7 +345,7 @@ Windows 会话的行为与边界：
 `powershell.exe -Command '...'`，例如：
 
 ```bash
-tsuite-support run SESSION_ID -- powershell.exe -NoProfile -Command 'Get-Service sshd'
+tsuite-connect run SESSION_ID -- powershell.exe -NoProfile -Command 'Get-Service sshd'
 ```
 
 本机手工关闭（管理员 PowerShell，替换 SESSION_ID）：

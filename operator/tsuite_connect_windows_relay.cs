@@ -9,7 +9,7 @@ using System.Text;
 using System.Threading;
 using Microsoft.Win32.SafeHandles;
 
-namespace TSuiteSupport {
+namespace TSuiteConnect {
     public static class WindowsRelay {
         public static void ReplaceFile(string source, string destination) {
             File.Replace(source, destination, null);
