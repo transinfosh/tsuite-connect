@@ -13,6 +13,7 @@ BASTION_PORT="22"
 BASTION_USER="tsuite-operator"
 BASTION_HOST_KEY_FILE=""
 OPERATOR_USER="adam"
+DEPLOYMENT_SERVICE_PERMISSIONS=false
 
 die() {
 	printf '错误: %s\n' "$*" >&2
@@ -30,6 +31,7 @@ usage() {
   --bastion-host HOST           默认 edge.trinfo.net
   --bastion-port PORT           默认 22
   --bastion-user USER           默认 tsuite-operator
+  --deployment-service-permissions  兼容既有 tsuite_deploy 控制机服务维护权限
   --operator-user USER          控制机日常运维账号，默认 adam
 EOF
 }
@@ -40,6 +42,7 @@ while (($#)); do
 		--bastion-host) BASTION_HOST="${2:-}"; shift ;;
 		--bastion-port) BASTION_PORT="${2:-}"; shift ;;
 		--bastion-user) BASTION_USER="${2:-}"; shift ;;
+		--deployment-service-permissions) DEPLOYMENT_SERVICE_PERMISSIONS=true ;;
 		--operator-user) OPERATOR_USER="${2:-}"; shift ;;
 		--help | -h) usage; exit 0 ;;
 		*) die "未知参数: $1" ;;
@@ -56,7 +59,7 @@ fi
 [[ "$BASTION_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "堡垒机用户无效"
 [[ "$OPERATOR_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "控制机运维用户无效"
 id "$OPERATOR_USER" >/dev/null 2>&1 || die "控制机运维用户不存在: $OPERATOR_USER"
-[[ -f "$REPO_ROOT/support-session/console/tsuite_support_remote_action.py" ]] || die "缺少控制机 broker 程序"
+[[ -f "$REPO_ROOT/console/tsuite_support_remote_action.py" ]] || die "缺少控制机 broker 程序"
 for command_name in getent gpasswd groupadd install python3 ssh-keygen systemctl useradd usermod visudo; do
 	command -v "$command_name" >/dev/null 2>&1 || die "缺少命令: $command_name"
 done
@@ -84,9 +87,9 @@ remove_broker_membership "$CONSOLE_USER"
 install -d -m 0750 -o root -g "$BROKER_GROUP" "$CONFIG_DIR"
 install -d -m 0700 -o "$BROKER_USER" -g "$BROKER_GROUP" "$STATE_DIR" "$STATE_DIR/sessions"
 install -m 0755 -o root -g root \
-	"$REPO_ROOT/support-session/console/tsuite_support_remote_action.py" \
+	"$REPO_ROOT/console/tsuite_support_remote_action.py" \
 	/usr/local/bin/tsuite-support-console-action
-install -m 0644 -o root -g root "$REPO_ROOT/support-session/operator/tsuite_support_activity.py" /usr/local/bin/tsuite_support_activity.py
+install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_support_activity.py" /usr/local/bin/tsuite_support_activity.py
 
 migrate_or_generate_key() {
 	local name legacy target
@@ -151,12 +154,17 @@ os.replace(temporary_name, target)
 PY
 chown root:"$BROKER_GROUP" "$CONFIG_DIR/action.json"
 
+# 保留既有 sudoers 文件名及别名，原地升级时避免重复定义。
+control_services="/usr/bin/systemctl restart tsuite-support-console.service"
+if [[ "$DEPLOYMENT_SERVICE_PERMISSIONS" == true ]]; then
+	control_services+=", /usr/bin/systemctl restart nginx.service, /usr/bin/systemctl restart tsuite-frpc.service, /usr/bin/systemctl restart tsuite-github-egress.service"
+fi
 sudoers_temporary="$(mktemp /etc/sudoers.d/.tsuite-deploy-operator.XXXXXX)"
 trap 'unlink "$sudoers_temporary" 2>/dev/null || true' EXIT
 cat >"$sudoers_temporary" <<EOF
 Cmnd_Alias TSUITE_SUPPORT_WEB = /usr/local/bin/tsuite-support-console-action create *, /usr/local/bin/tsuite-support-console-action set-platform *, /usr/local/bin/tsuite-support-console-action show *, /usr/local/bin/tsuite-support-console-action list, /usr/local/bin/tsuite-support-console-action close *, /usr/local/bin/tsuite-support-console-action claim
 Cmnd_Alias TSUITE_SUPPORT_OPERATOR = /usr/local/bin/tsuite-support-console-action show *, /usr/local/bin/tsuite-support-console-action list, /usr/local/bin/tsuite-support-console-action close *, /usr/local/bin/tsuite-support-console-action force-close *, /usr/local/bin/tsuite-support-console-action ssh *, /usr/local/bin/tsuite-support-console-action run *
-Cmnd_Alias TSUITE_CONTROL_SERVICES = /usr/bin/systemctl restart nginx.service, /usr/bin/systemctl restart tsuite-frpc.service, /usr/bin/systemctl restart tsuite-support-console.service, /usr/bin/systemctl restart tsuite-github-egress.service
+Cmnd_Alias TSUITE_CONTROL_SERVICES = $control_services
 $CONSOLE_USER ALL=($BROKER_USER) NOPASSWD: TSUITE_SUPPORT_WEB
 $OPERATOR_USER ALL=($BROKER_USER) NOPASSWD: TSUITE_SUPPORT_OPERATOR
 $OPERATOR_USER ALL=(root) NOPASSWD: TSUITE_CONTROL_SERVICES

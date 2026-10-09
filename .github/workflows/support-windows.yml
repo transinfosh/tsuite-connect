@@ -4,17 +4,17 @@ on:
     branches:
       - main
     paths:
-      - 'support-session/customer/*.ps1'
-      - 'support-session/operator/*.ps1'
-      - 'support-session/operator/*.cs'
-      - 'support-session/tests/*.ps1'
+      - 'customer/*.ps1'
+      - 'operator/*.ps1'
+      - 'operator/*.cs'
+      - 'tests/*.ps1'
       - '.github/workflows/support-windows.yml'
   pull_request:
     paths:
-      - 'support-session/customer/*.ps1'
-      - 'support-session/operator/*.ps1'
-      - 'support-session/operator/*.cs'
-      - 'support-session/tests/*.ps1'
+      - 'customer/*.ps1'
+      - 'operator/*.ps1'
+      - 'operator/*.cs'
+      - 'tests/*.ps1'
       - '.github/workflows/support-windows.yml'
 permissions:
   contents: read
@@ -38,10 +38,10 @@ jobs:
       - name: Windows PowerShell 5.1 syntax and lifecycle tests
         shell: powershell
         run: |
-          ./support-session/tests/test_windows_client.ps1
-          ./support-session/tests/test_windows_lease.ps1
-          ./support-session/tests/test_windows_diagnostics.ps1
-          ./support-session/tests/test_windows_permissions.ps1
-          ./support-session/tests/test_windows_operator.ps1
-          ./support-session/tests/test_windows_openssh_auth.ps1 -OpenSshDirectory "$env:RUNNER_TEMP/OpenSSH-8.1/OpenSSH-Win64"
-          ./support-session/tests/test_windows_openssh_auth.ps1 -OpenSshDirectory "$env:RUNNER_TEMP/OpenSSH-9.8.3/OpenSSH-Win64" -CompatibilityRuntime
+          ./tests/test_windows_client.ps1
+          ./tests/test_windows_lease.ps1
+          ./tests/test_windows_diagnostics.ps1
+          ./tests/test_windows_permissions.ps1
+          ./tests/test_windows_operator.ps1
+          ./tests/test_windows_openssh_auth.ps1 -OpenSshDirectory "$env:RUNNER_TEMP/OpenSSH-8.1/OpenSSH-Win64"
+          ./tests/test_windows_openssh_auth.ps1 -OpenSshDirectory "$env:RUNNER_TEMP/OpenSSH-9.8.3/OpenSSH-Win64" -CompatibilityRuntime

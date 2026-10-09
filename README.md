@@ -1,11 +1,14 @@
-# 临时远程支持会话
+# TSuite Support
 
-`support-session` 用于客户服务器无法被公司网络直接访问时，建立短时、可审计边界清晰的
+`tsuite-support` 用于客户服务器无法被公司网络直接访问时，建立短时、可审计边界清晰的
 SSH 反向隧道。客户只需执行一条由公司 CLI 生成的命令，无需另外输入会话码，后续操作由
 公司运维人员通过堡垒机完成。
 
-该模块独立于 `single-node` 和 `multi-node`，不会接管或修改现有 FRP 服务。FRP 与本模块可以
+这是独立仓库，不依赖 Frappe、Bench、Ansible、Docker 或 `tsuite_deploy`。运行时使用系统 Python 标准库、OpenSSH、systemd；HTTPS 入口使用 Caddy，控制台还需要 qrencode。不会接管或修改现有 FRP 服务。FRP 与本模块可以
 在同一堡垒机共存；两者不共用端口、Token、用户或配置文件。
+
+仓库地址：[transinfosh/tsuite-support](https://github.com/transinfosh/tsuite-support)。
+首次安装见[控制服务安装](control/README.md)，升级与发布见[运维手册](docs/operations.md)，原仓库迁移边界见[拆分记录](docs/migration.md)。
 
 ## 安全边界
 
@@ -39,7 +42,7 @@ SSH Host Key 也改变，新会话脚本会固定新的 Host Key。
 从固定版本检出仓库后执行：
 
 ```bash
-cd support-session/bastion
+cd bastion
 sudo ./install.sh \
   --bastion-host bastion-support.example.com \
   --operator-user tunnel-user
@@ -63,7 +66,7 @@ Authorization callback URL 为 `https://edge.trinfo.net/support/auth/github/call
 
 生产环境中页面安装在内网部署控制机，堡垒机只安装 forced-command 桥接程序。控制机通过固定
 Host Key 和专用 bridge key 调用堡垒机，bridge key 不能获得普通 Shell。具体安装方式见
-[control-node](../control-node/README.md)。堡垒机同机页面已经停用，避免 Web 进程与会话私钥处于
+[控制服务安装](control/README.md)。堡垒机同机页面已经停用，避免 Web 进程与会话私钥处于
 同一权限边界。浏览器中创建会话后，页面仅显示一次客户执行命令；完整命令包含接入凭据，应通过安全渠道发送给客户。该页面不替代客户发起的出站连接，也不提供
 浏览器终端；客户仍只需执行页面给出的那一条命令。
 
@@ -160,15 +163,15 @@ CA/会话结构及 Linux 接入命令保持兼容。部署时更新控制机 con
 console 服务；安装器已包含这些文件。不需要为本次客户端扩展修改 Edge/客户的既有 portable 协议。
 授权领取前可自由切换支持端命令；领取后若更换支持机或密钥，必须新建会话，不能再次领取同一授权。
 
-验证：`python3 -m unittest discover -s support-session/tests -p 'test_*.py'` 验证网页与既有授权；
-`powershell.exe -NoProfile -File support-session/tests/test_windows_operator.ps1` 在隔离目录验证原生权限、
+验证：`python3 -m unittest discover -s tests -p 'test_*.py'` 验证网页与既有授权；
+`powershell.exe -NoProfile -File tests/test_windows_operator.ps1` 在隔离目录验证原生权限、
 真实 keygen、带空格路径、SSH 配置、命令编码、二进制转发、退出码、超时和清理。
 Windows CI 已纳入此测试。Linux 上 pwsh 可验证语法、配置和命令转发，但不能代替真实 Windows 上的
 ConPTY、证书经 Edge 登录、持续输入续期与关闭清理验收；发布前仍需完成这些系统集成验证。
 2026-10-09 的完整 Windows CI 已通过，包括原生字节流、带 UTF-8 BOM 的宿主环境、管理员运行时
 凭据所有权、租约清理及两套 OpenSSH 认证测试；100 项 Python 测试与真实 SSH 集成验证也已通过。
-代码版本、部署备份、结果及验证边界见[本次修复验证记录](../docs/validation/support-session-review-fixes-20261009.md)。
-具备 sudo 的 Linux 测试机还可运行 `python3 support-session/tests/verify_portable_ssh.py --operator-pwsh
+代码版本、部署备份、结果及验证边界见[本次修复验证记录](docs/validation/support-session-review-fixes-20261009.md)。
+具备 sudo 的 Linux 测试机还可运行 `python3 tests/verify_portable_ssh.py --operator-pwsh
 <pwsh路径>`，用两个隔离 sshd 验证 PowerShell/C# 构造的证书连接、Edge 代理与主机密钥拒绝。
 
 兼容影响：create 结果新增 `operator_claim_token`（只在创建返回），会话及 enrollment 增加
@@ -187,7 +190,7 @@ manager/bridge/受限 Shell、Linux/Windows bootstrap/续期程序、控制机 b
 拒绝、原生到期、租约同步及普通关闭。真实 OpenSSH 验证命令：
 
 ```bash
-python3 support-session/tests/verify_portable_ssh.py
+python3 tests/verify_portable_ssh.py
 ```
 
 该检查用本机临时目录和两个仅监听回环的独立 sshd，需免密 sudo，不修改系统 SSH 配置或账号。
@@ -196,7 +199,7 @@ Windows 专属 CA 信任和双授权记录续期还需在可丢弃 Windows Serve
 ## 安装公司端 CLI
 
 ```bash
-cd support-session/operator
+cd operator
 sudo ./install.sh
 tsuite-support configure --bastion company-bastion
 ```
@@ -350,9 +353,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\TSuite
 验证命令：
 
 ```bash
-python3 -m unittest discover -s support-session/tests -p 'test_*.py'
-pwsh -NoProfile -File support-session/tests/test_windows_client.ps1
-pwsh -NoProfile -File support-session/tests/test_windows_lease.ps1
+python3 -m unittest discover -s tests -p 'test_*.py'
+pwsh -NoProfile -File tests/test_windows_client.ps1
+pwsh -NoProfile -File tests/test_windows_lease.ps1
 ```
 
 PowerShell 测试使用隔离替身验证任务和清理行为，不创建真实账号或服务。正式使用前还需在可丢弃的
@@ -379,5 +382,5 @@ Get-Content "$env:ProgramData\TSuiteSupport\diagnostics\*-startup.log"
 `bad permissions` / `UNPROTECTED PRIVATE KEY FILE` 拒绝它。客户端在启动任务前为主机私钥、
 隧道私钥、公钥授权文件和独立 sshd 配置重建文件 ACL：所有者为 Administrators，关闭继承，
 仅保留 SYSTEM 与 Administrators 的完全控制。不会修改 SAP1 或系统原有 SSH 服务的文件。
-原生权限回归测试：`powershell.exe -NoProfile -File support-session/tests/test_windows_permissions.ps1`
+原生权限回归测试：`powershell.exe -NoProfile -File tests/test_windows_permissions.ps1`
 （管理员 Windows 终端；Linux 会明确跳过此项）。

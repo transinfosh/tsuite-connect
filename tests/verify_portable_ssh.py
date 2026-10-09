@@ -6,7 +6,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--operator-pwsh", help="Also exercise the native operator's SSH construction via pwsh")
 options = parser.parse_args()
 
-r = pathlib.Path(__file__).resolve().parents[2]
+r = pathlib.Path(__file__).resolve().parents[1]
 processes = []
 username = getpass.getuser()
 
@@ -65,7 +65,7 @@ with tempfile.TemporaryDirectory(prefix="portable-sshd-", dir=pathlib.Path.home(
     relay = root / "relay.py"
     relay.write_text(
         'import importlib.util,json,pathlib\ns=importlib.util.spec_from_file_location("relay",'
-        + repr(str(r / "support-session/bastion/tsuite_support_console_action.py"))
+        + repr(str(r / "bastion/tsuite_support_console_action.py"))
         + ")\nm=importlib.util.module_from_spec(s);s.loader.exec_module(m)\nm.manager_output=lambda *args:pathlib.Path("
         + repr(str(root / "session.json"))
         + ').read_text()\nraise SystemExit(m.relay_session("012345abcdef"))\n'
@@ -155,7 +155,7 @@ with tempfile.TemporaryDirectory(prefix="portable-sshd-", dir=pathlib.Path.home(
             powershell = root / "native-smoke.ps1"
             powershell.write_text(
                 "$ErrorActionPreference = 'Stop'\n. "
-                + ps_quote(r / "support-session/operator/tsuite_support_windows.ps1")
+                + ps_quote(r / "operator/tsuite_support_windows.ps1")
                 + " -Mode Library\nInitialize-OperatorRelay\n$root = " + ps_quote(native)
                 + "\n$tools = [pscustomobject]@{ Ssh = " + ps_quote(shutil.which("ssh")) + " }\n"
                 + f"$settings = [pscustomobject]@{{id = '012345abcdef'; host = '127.0.0.1'; port = {ep}; user = '{username}'}}\n"

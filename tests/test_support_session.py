@@ -242,8 +242,8 @@ class StaticSecurityTest(unittest.TestCase):
 
 	def test_console_is_restricted_to_local_caddy_proxy_and_fixed_actions(self):
 		installer = (ROOT / "bastion" / "install-console.sh").read_text(encoding="utf-8")
-		control_installer = (ROOT.parent / "control-node" / "install-support-console.sh").read_text(encoding="utf-8")
-		prepare = (ROOT.parent / "control-node" / "prepare-support-access.sh").read_text(encoding="utf-8")
+		control_installer = (ROOT / "control" / "install-support-console.sh").read_text(encoding="utf-8")
+		prepare = (ROOT / "control" / "prepare-support-access.sh").read_text(encoding="utf-8")
 		self.assertIn("堡垒机同机支持页面已停用", installer)
 		self.assertIn("ProtectSystem=strict", control_installer)
 		self.assertNotIn("SupplementaryGroups=tsuite-deploy", control_installer)

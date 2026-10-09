@@ -16,6 +16,7 @@ GITHUB_CLIENT_SECRET_FILE=""
 GITHUB_ALLOWED_ORG="transinfosh"
 GITHUB_ALLOWED_TEAM=""
 PUBLIC_HOST="edge.trinfo.net"
+HTTPS_PROXY_URL=""
 LOCAL_ADMIN_USER=""
 LOCAL_ADMIN_PASSWORD_FILE=""
 LOCAL_ADMIN_TOTP_SECRET_FILE=""
@@ -37,6 +38,7 @@ usage() {
   --github-allowed-org ORG         允许登录的组织，默认 transinfosh
   --github-allowed-team SLUG       可选：限制到组织团队 slug
   --public-host HOST               公网域名，默认 edge.trinfo.net
+  --https-proxy URL                可选：GitHub OAuth 出站代理；默认直接联网
   --local-admin-user USER          启用本地管理员账号
   --local-admin-password-file FILE 仅 root 可读、只包含本地管理员密码
   --local-admin-totp-secret-file FILE 仅 root 可读、只包含 Base32 TOTP 密钥
@@ -49,6 +51,7 @@ while (($#)); do
 		--github-client-secret-file) GITHUB_CLIENT_SECRET_FILE="${2:-}"; shift ;;
 		--github-allowed-org) GITHUB_ALLOWED_ORG="${2:-}"; shift ;;
 		--github-allowed-team) GITHUB_ALLOWED_TEAM="${2:-}"; shift ;;
+		--https-proxy) HTTPS_PROXY_URL="${2:-}"; shift ;;
 		--public-host) PUBLIC_HOST="${2:-}"; shift ;;
 		--local-admin-user) LOCAL_ADMIN_USER="${2:-}"; shift ;;
 		--local-admin-password-file) LOCAL_ADMIN_PASSWORD_FILE="${2:-}"; shift ;;
@@ -70,6 +73,7 @@ fi
 [[ "$GITHUB_ALLOWED_ORG" =~ ^[A-Za-z0-9-]{1,100}$ ]] || die "GitHub 组织名无效"
 [[ -z "$GITHUB_ALLOWED_TEAM" || "$GITHUB_ALLOWED_TEAM" =~ ^[A-Za-z0-9-]{1,100}$ ]] || die "GitHub 团队 slug 无效"
 [[ "$PUBLIC_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || die "公网域名无效"
+[[ -z "$HTTPS_PROXY_URL" || "$HTTPS_PROXY_URL" =~ ^https?://[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || die "代理 URL 无效"
 if [[ -n "$LOCAL_ADMIN_USER$LOCAL_ADMIN_PASSWORD_FILE$LOCAL_ADMIN_TOTP_SECRET_FILE" ]]; then
 	[[ "$LOCAL_ADMIN_USER" =~ ^[A-Za-z0-9_-]{3,64}$ ]] || die "本地管理员用户名无效"
 	[[ -f "$LOCAL_ADMIN_PASSWORD_FILE" && -f "$LOCAL_ADMIN_TOTP_SECRET_FILE" ]] || die "本地管理员密码和 TOTP 密钥文件必须同时提供"
@@ -97,13 +101,13 @@ install -d -m 0755 -o root -g root "$INSTALL_ROOT"
 install -d -m 0750 -o root -g "$SERVICE_GROUP" "$CONFIG_DIR"
 install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$STATE_DIR"
 install -m 0755 -o root -g root \
-	"$REPO_ROOT/support-session/console/tsuite_support_console.py" \
+	"$REPO_ROOT/console/tsuite_support_console.py" \
 	"$INSTALL_ROOT/tsuite-support-console"
 
-install -m 0644 -o root -g root "$REPO_ROOT/support-session/operator/tsuite_support_portable.py" "$INSTALL_ROOT/tsuite_support_portable.py"
-install -m 0644 -o root -g root "$REPO_ROOT/support-session/operator/tsuite_support_activity.py" "$INSTALL_ROOT/tsuite_support_activity.py"
-install -m 0644 -o root -g root "$REPO_ROOT/support-session/operator/tsuite_support_windows.ps1" "$INSTALL_ROOT/tsuite_support_windows.ps1"
-install -m 0644 -o root -g root "$REPO_ROOT/support-session/operator/tsuite_support_windows_relay.cs" "$INSTALL_ROOT/tsuite_support_windows_relay.cs"
+install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_support_portable.py" "$INSTALL_ROOT/tsuite_support_portable.py"
+install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_support_activity.py" "$INSTALL_ROOT/tsuite_support_activity.py"
+install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_support_windows.ps1" "$INSTALL_ROOT/tsuite_support_windows.ps1"
+install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_support_windows_relay.cs" "$INSTALL_ROOT/tsuite_support_windows_relay.cs"
 
 config_temporary="$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")"
 trap 'rm -f -- "$config_temporary"' EXIT
@@ -117,11 +121,13 @@ import pathlib
 import sys
 
 path, client_id, secret_path, allowed_org, allowed_team, host, state_dir, existing_path, local_user, password_path, totp_path = sys.argv[1:]
+existing = {}
+if pathlib.Path(existing_path).is_file():
+    with pathlib.Path(existing_path).open(encoding="utf-8") as handle:
+        existing = json.load(handle)
 if secret_path:
     secret = pathlib.Path(secret_path).read_text(encoding="utf-8")
 else:
-    with pathlib.Path(existing_path).open(encoding="utf-8") as handle:
-        existing = json.load(handle)
     secret = existing.get("github_client_secret", "")
 if not isinstance(secret, str) or not secret or "\n" in secret:
     raise SystemExit("GitHub Client Secret 文件格式无效")
@@ -157,7 +163,7 @@ trap - EXIT
 cat >/etc/systemd/system/tsuite-support-console.service <<EOF
 [Unit]
 Description=TSuite GitHub support management console
-After=network-online.target tsuite-frpc.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -166,8 +172,8 @@ User=$SERVICE_USER
 Group=$SERVICE_GROUP
 ExecStartPre=/usr/bin/sudo -n -u $BROKER_USER /usr/local/bin/tsuite-support-console-action list
 ExecStart=/usr/bin/python3 $INSTALL_ROOT/tsuite-support-console
-Environment=HTTPS_PROXY=http://127.0.0.1:18080
-Environment=HTTP_PROXY=http://127.0.0.1:18080
+Environment=HTTPS_PROXY=$HTTPS_PROXY_URL
+Environment=HTTP_PROXY=$HTTPS_PROXY_URL
 Restart=on-failure
 RestartSec=3
 PrivateTmp=yes
@@ -204,14 +210,14 @@ rm -f -- \
 
 systemctl daemon-reload
 systemctl enable --now tsuite-support-console.service
-systemctl restart tsuite-support-console.service nginx.service
+systemctl restart tsuite-support-console.service
 systemctl is-active --quiet tsuite-support-console.service || die "支持管理页面未启动"
 for _ in {1..20}; do
 	ss -lnt | grep -q '127.0.0.1:8765' && break
 	sleep 0.25
 done
 ss -lnt | grep -q '127.0.0.1:8765' || die "支持管理页面未监听本机端口"
-http_status="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/support/)"
+http_status="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/)"
 [[ "$http_status" == "401" ]] || die "本机支持页面健康检查失败: HTTP $http_status"
 
 printf 'GitHub 支持管理页面安装完成：https://%s/support/\n' "$PUBLIC_HOST"

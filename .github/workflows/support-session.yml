@@ -5,13 +5,21 @@ on:
     branches:
       - main
     paths:
-      - "control-node/**"
-      - "support-session/**"
+      - "control/**"
+      - "bastion/**"
+      - "console/**"
+      - "customer/**"
+      - "operator/**"
+      - "tests/**"
       - ".github/workflows/support-session.yml"
   pull_request:
     paths:
-      - "control-node/**"
-      - "support-session/**"
+      - "control/**"
+      - "bastion/**"
+      - "console/**"
+      - "customer/**"
+      - "operator/**"
+      - "tests/**"
       - ".github/workflows/support-session.yml"
 
 permissions:
@@ -25,20 +33,21 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install shell tools
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck openssh-server
 
       - name: Check Python and shell syntax
         run: |
-          python3 -m py_compile support-session/bastion/*.py support-session/console/*.py support-session/operator/tsuite-support
-          bash -n control-node/*.sh control-node/github-egress/*.sh support-session/bastion/*.sh support-session/customer/*.sh support-session/operator/*.sh
+          python3 -m py_compile bastion/*.py console/*.py operator/tsuite-support operator/*.py customer/*.py
+          for script in control/*.sh bastion/*.sh customer/*.sh operator/*.sh; do bash -n "$script"; done
 
       - name: Run support-session tests
         run: |
-          python3 -m unittest discover -s support-session/tests -p 'test_*.py'
-          support-session/tests/test_ssh_restrictions.sh
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          tests/test_ssh_restrictions.sh
+          python3 tests/verify_portable_ssh.py
 
       - name: Run ShellCheck
         run: >-
-          shellcheck --severity=warning control-node/*.sh control-node/github-egress/*.sh
-          support-session/bastion/*.sh support-session/customer/*.sh support-session/operator/*.sh
-          support-session/tests/test_ssh_restrictions.sh
+          shellcheck --severity=warning control/*.sh
+          bastion/*.sh customer/*.sh operator/*.sh
+          tests/test_ssh_restrictions.sh
