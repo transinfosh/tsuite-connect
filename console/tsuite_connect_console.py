@@ -551,7 +551,7 @@ def login_layout(content: str) -> str:
 .otp-input{text-align:center;font:600 22px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.28em;padding-left:calc(12px + .28em)}
 @media(max-width:480px){.login-shell{min-height:calc(100svh - 48px);padding:20px 0;width:100%}.login-card{padding:32px 24px}.login-card h1{font-size:25px}}
 @media(prefers-reduced-motion:reduce){.github-login{transition:none}}
-</style><main class="login-shell"><section class="login-card">{content}</section><p class="login-footer">TSuite · 远程支持工作台</p></main>""".replace("{content}", content)
+</style><main class="login-shell"><section class="login-card">{content}</section><p class="login-footer">TSuite Connect · 远程连接工作台</p></main>""".replace("{content}", content)
 
 
 def login_content(local_enabled: bool = False, error: str = "") -> str:
@@ -562,9 +562,9 @@ def login_content(local_enabled: bool = False, error: str = "") -> str:
 <label>账号<input name="username" required autofocus autocomplete="username"></label>
 <label>密码<input name="password" type="password" required autocomplete="current-password"></label>
 <button class="primary">继续</button></form>"""
-	content = """<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
-<h1 id="login-title">远程远程会话</h1>
-<p class="login-description">登录支持工作台，安全地创建和管理临时远程会话。</p>
+	content = """<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite Connect</span></div>
+<h1 id="login-title">远程连接</h1>
+<p class="login-description">登录远程连接工作台，安全地创建和管理临时远程会话。</p>
 {local_login}<div class="login-divider"><span>其他登录方式</span></div>
 <div class="social-login"><a class="github-login" href="/connect/login" aria-label="使用 GitHub 登录" title="使用 GitHub 登录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.776.418-1.305.76-1.605-2.665-.305-5.467-1.333-5.467-5.93 0-1.31.467-2.382 1.235-3.222-.124-.303-.535-1.523.117-3.176 0 0 1.008-.322 3.3 1.23A11.5 11.5 0 0 1 12 6.3c1.02.005 2.047.138 3.006.404 2.29-1.552 3.296-1.23 3.296-1.23.654 1.653.243 2.873.12 3.176.77.84 1.233 1.912 1.233 3.222 0 4.61-2.807 5.622-5.48 5.92.43.37.814 1.102.814 2.222 0 1.606-.015 2.896-.015 3.29 0 .32.216.694.825.576C20.565 22.296 24 17.797 24 12.5 24 5.87 18.627.5 12 .5Z"/></svg></a></div>
 <p class="login-note">GitHub 登录仅作为备用方式</p>""".replace("{local_login}", local_login)
@@ -573,7 +573,7 @@ def login_content(local_enabled: bool = False, error: str = "") -> str:
 
 def totp_content(error: str = "") -> str:
 	error_html = f'<p class="login-error" role="alert">{html.escape(error)}</p>' if error else ""
-	content = """<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
+	content = """<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite Connect</span></div>
 <h1 id="login-title">验证身份</h1><p class="login-description">账号密码已通过，请输入验证器中显示的 6 位动态验证码。</p>
 {error}<form class="login-form" method="post" action="/connect/login/local/totp"><label>动态验证码<input class="otp-input" name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus autocomplete="one-time-code"></label><button class="primary">确认登录</button></form>
 <a class="login-back" href="/connect/">返回重新登录</a>""".replace("{error}", error_html)
@@ -582,7 +582,7 @@ def totp_content(error: str = "") -> str:
 
 def invite_password_content(token: str, username: str, error: str = "") -> str:
 	error_html = f'<p class="login-error" role="alert">{html.escape(error)}</p>' if error else ""
-	content = f"""<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
+	content = f"""<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite Connect</span></div>
 <h1>设置本地账号</h1><p class="login-description">为 <strong>{html.escape(username)}</strong> 设置登录密码，下一步绑定动态验证码。</p>
 {error_html}<form class="login-form" method="post" action="/connect/invite/password">
 <input type="hidden" name="token" value="{html.escape(token)}">
@@ -596,7 +596,7 @@ def invite_totp_content(token: str, username: str, secret: str, error: str = "")
 	error_html = f'<p class="login-error" role="alert">{html.escape(error)}</p>' if error else ""
 	uri = "otpauth://totp/" + urllib.parse.quote(f"TSuite:{username}") + "?" + urllib.parse.urlencode({"secret": secret, "issuer": "TSuite"})
 	qr_data_uri = totp_qr_data_uri(uri)
-	content = f"""<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite</span></div>
+	content = f"""<div class="login-brand"><span class="login-mark" aria-hidden="true">TS</span><span>TSuite Connect</span></div>
 <h1>绑定动态验证码</h1><p class="login-description">使用验证器 App 扫描二维码，然后输入当前显示的 6 位验证码完成绑定。</p>
 {error_html}<div class="totp-qr"><img src="{qr_data_uri}" alt="TSuite 动态验证码绑定二维码" width="200" height="200"></div>
 <details class="totp-fallback"><summary>无法扫码？使用其他绑定方式</summary><div class="secret">{html.escape(secret)}</div>
@@ -1011,7 +1011,7 @@ class Application:
 					self.store.fail_local_user_invite(token)
 					return self.response(start_response, HTTPStatus.BAD_REQUEST, page("绑定动态验证码", invite_totp_content(token, str(invite["username"]), str(invite["totp_secret"]), "动态验证码不正确，请检查手机时间后重试")))
 				self.store.activate_local_user_invite(token)
-				content = '<section class="card" style="max-width:520px;margin:80px auto;text-align:center"><h1>账号已启用</h1><p>密码和动态验证码绑定成功，现在可以登录支持工作台。</p><a class="button" href="/connect/">前往登录</a></section>'
+				content = '<section class="card" style="max-width:520px;margin:80px auto;text-align:center"><h1>账号已启用</h1><p>密码和动态验证码绑定成功，现在可以登录远程连接工作台。</p><a class="button" href="/connect/">前往登录</a></section>'
 				return self.response(start_response, HTTPStatus.OK, page("账号已启用", content))
 			session_id, session = self.require_session(environ)
 			if path == "/logout" and method == "POST":
