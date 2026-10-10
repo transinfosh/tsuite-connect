@@ -28,7 +28,7 @@ Linux 上的 PowerShell 验证不能替代 Windows ACL 验证。
 - 堡垒机：`sudo tsuite-support-session list`、`systemctl is-active caddy tsuite-support-gc.timer`。
 - 控制服务：`sudo -n -u tsuite-connect-operator tsuite-connect-console-action list </dev/null`；
   检查 `tsuite-connect-console.service`、`tsuite-connect-operator-gc.timer`。
-- HTTPS：`/support/` 与 `/connect/` 直接代理，不做入口地址跳转；未登录均返回 401。旧客户端和 GitHub 回调仍直接代理，不能重定向；两个 operator-client 下载入口返回 200 且 no-store。
+- HTTPS：页面入口为 `/connect/`，未登录返回 401；旧页面入口 `/support` 与 `/support/` 返回 404，不做跳转。旧客户端和 GitHub 回调仍直接代理，不能重定向；两个 operator-client 下载入口返回 200 且 no-store。
 
 使用固定 tag/归档摘要。备份目标程序、服务配置、权限及固定身份后更新；优先在无活动会话时更新。
 保留现有 Connect 配置、SSH Host Key、会话 CA 和会话状态；2.52 的旧 Support 安装按[改名说明](rename-connect.md)迁移，Edge/客户机的既有协议路径继续兼容。
