@@ -15,13 +15,14 @@ class ControlConfigTests(unittest.TestCase):
             root = pathlib.Path(directory)
             existing = root / "existing.json"
             local = {"local_admin_user": "admin", "local_password_hash": "scrypt$stored", "local_totp_secret": "TESTSECRET"}
-            existing.write_text(json.dumps({"github_client_secret": "old", "github_callback_url": "https://support.example.com/support/auth/github/callback", **local}))
+            existing.write_text(json.dumps({"session_ttl_seconds": 86400, "github_client_secret": "old", "github_callback_url": "https://support.example.com/support/auth/github/callback", **local}))
             secret = root / "secret"
             secret.write_text("new-secret")
             output = root / "new.json"
             subprocess.run([sys.executable, "-c", writer, str(output), "client_id", str(secret), "example-org", "", "support.example.com", str(root), str(existing), "", "", ""], check=True)
             config = json.loads(output.read_text())
             self.assertEqual(config["github_client_secret"], "new-secret")
+            self.assertEqual(config["session_ttl_seconds"], 86400)
             self.assertEqual(config["github_callback_url"], "https://support.example.com/support/auth/github/callback")
             for name, value in local.items():
                 self.assertEqual(config[name], value)

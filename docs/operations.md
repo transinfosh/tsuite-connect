@@ -10,12 +10,17 @@
 在仓库根目录执行：
 
 ```bash
+npm ci --prefix frontend
+npm run build --prefix frontend
+npm run test:e2e --prefix frontend
 python3 -m unittest discover -s tests -p 'test_*.py'
 python3 -m py_compile bastion/*.py console/*.py operator/tsuite-connect operator/*.py customer/*.py
 shellcheck --severity=warning control/*.sh bastion/*.sh customer/*.sh operator/*.sh tests/test_ssh_restrictions.sh
 tests/test_ssh_restrictions.sh
 python3 tests/verify_portable_ssh.py
 ```
+
+浏览器检查首次运行前执行 `cd frontend && npx playwright install chromium`，使用仅监听回环的合成 broker 与临时 SQLite，不操作真实客户。
 
 最后一项需要免交互 sudo，启动两个隔离本机 sshd，使用临时密钥和随机回环端口，不修改系统 sshd。
 Windows CI 在 Windows PowerShell 5.1 验证 ACL、生命周期、原生二进制转发及 OpenSSH 8.1/9.8.3 认证。
@@ -33,6 +38,10 @@ Linux 上的 PowerShell 验证不能替代 Windows ACL 验证。
 使用固定 tag/归档摘要。备份目标程序、服务配置、权限及固定身份后更新；优先在无活动会话时更新。
 保留现有 Connect 配置、SSH Host Key、会话 CA 和会话状态；2.52 的旧 Support 安装按[改名说明](rename-connect.md)迁移，Edge/客户机的既有协议路径继续兼容。
 固定私钥备份需加密且限制权限；短期会话私钥不进入长期备份。不得为了验证创建、关闭或修改无关客户会话。
+新版 React + shadcn/ui 控制台需一起更新 `tsuite-connect-console`、`tsuite_connect_web.py` 和构建后的 `static/`。
+先在维护机使用 Node.js 22.12+ 及 lockfile 构建，再随部署目录传输，服务端运行无需 Node。
+安装器提前校验入口产物，并保留 `session_ttl_seconds`。不得仅替换旧入口而漏掉新模块或资源。
+
 通过 stdin 执行 SSH 维护脚本时，脚本内 broker/SSH 自检命令应加 `</dev/null`，避免吞掉后续脚本。
 更新后核验文件摘要、权限、systemd 服务、HTTPS 入口；失败时恢复备份程序和配置并重新核验。
 
@@ -40,6 +49,7 @@ Linux 上的 PowerShell 验证不能替代 Windows ACL 验证。
 
 VERSION 为 `X.Y.Z`；验证通过后提交、创建同版本不可移动 tag `vX.Y.Z`。
 使用 `git archive --format=tar.gz --prefix=tsuite-connect-vX.Y.Z/ vX.Y.Z` 生成源码归档，
+源码归档不含被忽略的 `console/static`，从该 tag 的源码构建页面后才能安装；若发布额外构建包，须同样固定源码 tag 与 lockfile 并提供摘要。
 通过 `sha256sum` 生成校验文件，将两者发布到同名 GitHub Release。
 业务部署使用已部署在 `192.168.2.52` 的支持服务，入口为 `https://edge.trinfo.net/connect/`。
 `tsuite_deploy` 不下载、不锁定版本、不安装支持工具；支持服务的发布和升级由本仓库独立维护。

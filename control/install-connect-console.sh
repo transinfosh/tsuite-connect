@@ -78,6 +78,7 @@ if [[ -n "$LOCAL_ADMIN_USER$LOCAL_ADMIN_PASSWORD_FILE$LOCAL_ADMIN_TOTP_SECRET_FI
 	[[ "$LOCAL_ADMIN_USER" =~ ^[A-Za-z0-9_-]{3,64}$ ]] || die "本地管理员用户名无效"
 	[[ -f "$LOCAL_ADMIN_PASSWORD_FILE" && -f "$LOCAL_ADMIN_TOTP_SECRET_FILE" ]] || die "本地管理员密码和 TOTP 密钥文件必须同时提供"
 fi
+[[ -f "$REPO_ROOT/console/static/index.html" ]] || die "缺少 React 页面构建产物，请先执行 npm ci --prefix frontend && npm run build --prefix frontend"
 [[ -f /etc/tsuite-connect-control/action.json ]] || die "请先运行 prepare-connect-access.sh"
 [[ -x /usr/local/bin/tsuite-connect-console-action ]] || die "缺少控制台远程操作程序"
 id "$BROKER_USER" >/dev/null 2>&1 || die "缺少支持会话 broker 用户"
@@ -103,6 +104,13 @@ install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$STATE_DIR"
 install -m 0755 -o root -g root \
 	"$REPO_ROOT/console/tsuite_connect_console.py" \
 	"$INSTALL_ROOT/tsuite-connect-console"
+
+install -m 0644 -o root -g root "$REPO_ROOT/console/tsuite_connect_web.py" "$INSTALL_ROOT/tsuite_connect_web.py"
+install -d -m 0755 -o root -g root "$INSTALL_ROOT/static/assets"
+install -m 0644 -o root -g root "$REPO_ROOT/console/static/index.html" "$INSTALL_ROOT/static/index.html"
+for asset in "$REPO_ROOT"/console/static/assets/*; do
+	install -m 0644 -o root -g root "$asset" "$INSTALL_ROOT/static/assets/"
+done
 
 install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_connect_portable.py" "$INSTALL_ROOT/tsuite_connect_portable.py"
 install -m 0644 -o root -g root "$REPO_ROOT/operator/tsuite_connect_activity.py" "$INSTALL_ROOT/tsuite_connect_activity.py"
@@ -140,6 +148,8 @@ value = {
     "listen_host": "127.0.0.1",
     "listen_port": 8765,
 }
+if "session_ttl_seconds" in existing:
+    value["session_ttl_seconds"] = existing["session_ttl_seconds"]
 if existing.get("github_callback_url"):
     value["github_callback_url"] = existing["github_callback_url"]
 if allowed_team:

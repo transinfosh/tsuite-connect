@@ -35,7 +35,16 @@ sudo bastion/install-console-bridge.sh \
   --operator-user tsuite-operator
 ```
 
-4. 创建 GitHub OAuth App：Homepage 为 `https://connect.example.com/connect/`，Callback 为
+4. 在维护机或 CI 使用 Node.js 22.12+ 构建 React 页面，随后把含 `console/static` 的目录传到控制机：
+
+```bash
+npm ci --prefix frontend
+npm run build --prefix frontend
+```
+
+控制服务运行时不依赖 Node.js 或外部 CDN。源码归档不包含构建产物，安装器缺少产物时提前拒绝安装。
+
+5. 创建 GitHub OAuth App：Homepage 为 `https://connect.example.com/connect/`，Callback 为
 `https://connect.example.com/connect/auth/github/callback`，使用 `read:org` scope。Secret 通过 root-only 文件传入。
 
 ```bash
@@ -50,6 +59,10 @@ sudo control/install-connect-console.sh \
 `--local-admin-totp-secret-file`。首次安装仍需要 OAuth 配置；升级可省略 Secret 文件以沿用现有配置。
 安装器默认直接访问 GitHub；受限网络可显式传入 `--https-proxy http://127.0.0.1:18080`。
 安装器只管理支持服务，直接检查 `127.0.0.1:8765/` 返回 401，不要求 Nginx 或 FRP。
+
+网页登录默认 7 天固定有效。管理员可在 root 管理的配置中设置 `session_ttl_seconds`
+（8 小时至 30 天整数秒数），重启控制台后新登录采用新期限，原登录到期时间不变。
+原地安装保留已有该字段。GitHub 组织资格只在登录时校验，详见[控制台契约](../docs/console/控制台-规格契约.md)。
 
 ## HTTPS 路由
 

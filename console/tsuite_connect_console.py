@@ -30,7 +30,7 @@ from wsgiref.simple_server import WSGIRequestHandler, make_server
 
 
 MAX_BODY_BYTES = 8192
-SESSION_TTL_SECONDS = 8 * 60 * 60
+SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 OAUTH_STATE_TTL_SECONDS = 10 * 60
 LOCAL_LOGIN_TTL_SECONDS = 5 * 60
 LOCAL_INVITE_TTL_SECONDS = 30 * 60
@@ -76,7 +76,11 @@ CLOSE_MODE_LABELS = {"normal": "正常关闭", "force": "强制关闭", "expiry"
 
 
 class ConsoleError(RuntimeError):
-	pass
+	def __init__(self, message: str, *, code: str = "request_failed", status: HTTPStatus = HTTPStatus.BAD_REQUEST, request_id: str | None = None):
+		super().__init__(message)
+		self.code = code
+		self.status = status
+		self.request_id = request_id
 
 
 @dataclass(frozen=True)
@@ -93,6 +97,7 @@ class Settings:
 	local_password_hash: str | None = None
 	local_totp_secret: str | None = None
 	github_callback_url: str | None = None
+	session_ttl_seconds: int = SESSION_TTL_SECONDS
 
 	@classmethod
 	def load(cls, path: pathlib.Path) -> "Settings":
@@ -101,6 +106,7 @@ class Settings:
 		if not isinstance(value, dict):
 			raise ConsoleError("控制台配置必须是 JSON 对象")
 		settings = cls(
+			session_ttl_seconds=value.get("session_ttl_seconds", SESSION_TTL_SECONDS),
 			github_callback_url=value.get("github_callback_url"),
 			client_id=str(value["github_client_id"]),
 			client_secret=str(value["github_client_secret"]),
@@ -118,6 +124,8 @@ class Settings:
 		return settings
 
 	def validate(self) -> None:
+		if type(self.session_ttl_seconds) is not int or not 8 * 3600 <= self.session_ttl_seconds <= 30 * 86400:
+			raise ConsoleError("网页登录有效期必须是 8 小时至 30 天的整数秒数")
 		parsed = urllib.parse.urlsplit(self.public_url)
 		if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
 			raise ConsoleError("public_url 必须是不带参数的 HTTPS 地址")
@@ -152,7 +160,8 @@ class Settings:
 
 
 class Store:
-	def __init__(self, state_dir: pathlib.Path):
+	def __init__(self, state_dir: pathlib.Path, session_ttl_seconds: int = SESSION_TTL_SECONDS):
+		self.session_ttl_seconds = session_ttl_seconds
 		self.path = state_dir / "console.sqlite3"
 		state_dir.mkdir(parents=True, exist_ok=True)
 		with self.connection() as connection:
@@ -356,7 +365,7 @@ class Store:
 		with self.connection() as connection:
 			connection.execute(
 				"INSERT INTO web_session(id, login, name, csrf, expires_at, is_admin, auth_provider) VALUES (?, ?, ?, ?, ?, ?, ?)",
-				(session_id, login, name, csrf, int(time.time()) + SESSION_TTL_SECONDS, int(is_admin), auth_provider),
+				(session_id, login, name, csrf, int(time.time()) + self.session_ttl_seconds, int(is_admin), auth_provider),
 			)
 		return session_id, csrf
 
@@ -389,7 +398,7 @@ def github_json(request: urllib.request.Request, body: dict[str, str] | None = N
 	try:
 		with urllib.request.urlopen(request, timeout=10) as response:
 			value = json.loads(response.read().decode())
-	except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as error:
+	except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
 		raise ConsoleError("GitHub 服务暂时不可用") from error
 	if not isinstance(value, dict):
 		raise ConsoleError("GitHub 返回无效数据")
@@ -415,25 +424,29 @@ def github_identity(settings: Settings, code: str, verifier: str) -> tuple[str, 
 	login = user.get("login")
 	if not isinstance(login, str) or not login:
 		raise ConsoleError("GitHub 账户信息无效")
-	membership = github_json(
-		urllib.request.Request(
-			f"https://api.github.com/user/memberships/orgs/{urllib.parse.quote(settings.allowed_org, safe='')}",
-			headers=headers,
-		)
+	def require_membership(url: str, label: str) -> None:
+		message = f"GitHub 账号 {login} 需要是 {label} 的有效成员。请先接受邀请，并授权 Connect 读取组织成员资格（read:org）；若组织限制 OAuth 应用，请联系组织管理员批准后重新登录。"
+		try:
+			membership = github_json(urllib.request.Request(url, headers=headers))
+		except ConsoleError as error:
+			cause = error.__cause__
+			if isinstance(cause, urllib.error.HTTPError) and cause.code in {403, 404}:
+				raise ConsoleError(message, code="github_membership_required", status=HTTPStatus.FORBIDDEN) from error
+			raise
+		if membership.get("state") != "active":
+			raise ConsoleError(message, code="github_membership_required", status=HTTPStatus.FORBIDDEN)
+
+	require_membership(
+		f"https://api.github.com/user/memberships/orgs/{urllib.parse.quote(settings.allowed_org, safe='')}",
+		f"组织 {settings.allowed_org}",
 	)
-	if membership.get("state") != "active":
-		raise ConsoleError("该 GitHub 账户不在允许的组织中")
 	if settings.allowed_team:
-		team = github_json(
-			urllib.request.Request(
-				"https://api.github.com/orgs/"
-				f"{urllib.parse.quote(settings.allowed_org, safe='')}/teams/"
-				f"{urllib.parse.quote(settings.allowed_team, safe='')}/memberships/{urllib.parse.quote(login, safe='')}",
-				headers=headers,
-			)
+		require_membership(
+			"https://api.github.com/orgs/"
+			f"{urllib.parse.quote(settings.allowed_org, safe='')}/teams/"
+			f"{urllib.parse.quote(settings.allowed_team, safe='')}/memberships/{urllib.parse.quote(login, safe='')}",
+			f"组织 {settings.allowed_org} 中团队 {settings.allowed_team}",
 		)
-		if team.get("state") != "active":
-			raise ConsoleError("该 GitHub 账户不在允许的团队中")
 	name = user.get("name") if isinstance(user.get("name"), str) else login
 	return login, name
 
@@ -485,15 +498,35 @@ def totp_qr_data_uri(uri: str) -> str:
 
 
 def manager(*arguments: str, input_text: str | None = None) -> str:
+	operation = str(arguments[0]) if arguments else "unknown"
 	try:
 		result = subprocess.run(
-				["sudo", "-n", "-u", BROKER_USER, ACTION, *arguments],
+			["sudo", "-n", "-u", BROKER_USER, ACTION, *arguments],
 			check=False, capture_output=True, text=True, timeout=30, input=input_text,
 		)
-	except (OSError, subprocess.TimeoutExpired) as error:
-		raise ConsoleError("远程会话服务暂时不可用") from error
+	except subprocess.TimeoutExpired as error:
+		raise ConsoleError("远程操作等待超过 30 秒，结果尚未确认。请刷新会话状态后重试。", code="operation_timeout", status=HTTPStatus.GATEWAY_TIMEOUT) from error
+	except OSError as error:
+		raise ConsoleError("无法启动远程会话服务，请联系管理员检查控制服务。", code="broker_unavailable", status=HTTPStatus.SERVICE_UNAVAILABLE) from error
 	if result.returncode:
-		raise ConsoleError("远程会话操作失败，请稍后重试或查看堡垒机服务日志")
+		# Only known categories cross the broker boundary: stderr can contain credentials.
+		detail = result.stderr or ""
+		categories = (
+			("客户侧清理未确认", "客户侧清理未确认，连接尚未撤销。请确认客户在线并重试；仍失败时联系运维核查。", "cleanup_unconfirmed"),
+			("客户隧道当前不可达", "客户隧道不可达。请检查客户网络、SSH 服务及接入程序后重试。", "tunnel_unreachable"),
+			("Connection refused", "SSH 连接被拒绝，请检查客户隧道和 SSH 服务是否仍在线。", "ssh_refused"),
+			("Permission denied", "SSH 认证失败，请联系运维检查当前会话的密钥及账号权限。", "ssh_auth_failed"),
+			("Host key verification failed", "SSH 主机密钥验证失败，请联系运维核对主机身份。", "host_key_mismatch"),
+			("会话不存在", "该会话不存在，请返回列表刷新状态。", "session_not_found"),
+			("尚未接入", "客户尚未接入，请先完成客户连接后重试。", "not_enrolled"),
+			("不能再切换客户机操作系统", "无法切换客户系统；客户可能已经接入，请刷新会话状态。", "platform_locked"),
+		)
+		for needle, message, code in categories:
+			if needle in detail:
+				raise ConsoleError(message, code=code, status=HTTPStatus.CONFLICT)
+		request_id = secrets.token_hex(6)
+		print(f"Connect diagnostic={request_id} operation={operation} exit={result.returncode}", file=sys.stderr)
+		raise ConsoleError(f"远程会话操作失败（退出码 {result.returncode}）。请联系管理员检查服务状态。诊断编号：{request_id}", code="broker_failed", status=HTTPStatus.BAD_GATEWAY, request_id=request_id)
 	return result.stdout
 
 
@@ -765,7 +798,7 @@ def configured_session_content(created: dict[str, Any], csrf: str, customer: str
 class Application:
 	def __init__(self, settings: Settings):
 		self.settings = settings
-		self.store = Store(settings.state_dir)
+		self.store = Store(settings.state_dir, settings.session_ttl_seconds)
 		self.store.ensure_bootstrap_admin(settings)
 
 	def response(self, start_response: Callable[..., Any], status: HTTPStatus, body: bytes, headers: Iterable[tuple[str, str]] = ()) -> list[bytes]:
@@ -964,11 +997,13 @@ class Application:
 					)
 				self.store.consume_local_login_challenge(challenge_id)
 				session_id, _ = self.store.new_session(str(user["username"]), str(user["display_name"]), bool(user["is_admin"]), "local")
-				session_cookie = f"tsuite_connect_session={session_id}; Path=/connect; Secure; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}"
+				session_cookie = f"tsuite_connect_session={session_id}; Path=/connect; Secure; HttpOnly; SameSite=Lax; Max-Age={self.settings.session_ttl_seconds}"
 				clear = "tsuite_connect_local=; Path=/connect/login/local/totp; Secure; HttpOnly; SameSite=Strict; Max-Age=0"
 				return self.redirect(start_response, "/connect/", [("Set-Cookie", session_cookie), ("Set-Cookie", clear)])
 			if path == "/auth/github/callback" and method == "GET":
 				query = urllib.parse.parse_qs(environ.get("QUERY_STRING", ""))
+				if query.get("error", [""])[-1] == "access_denied":
+					raise ConsoleError("你取消了 GitHub 授权，请返回工作台重新登录。", code="github_access_denied")
 				state, code = query.get("state", [""])[-1], query.get("code", [""])[-1]
 				browser_state = parse_cookie(environ.get("HTTP_COOKIE"), "tsuite_connect_oauth")
 				if not browser_state or not secrets.compare_digest(browser_state, state):
@@ -978,7 +1013,7 @@ class Application:
 					raise ConsoleError("GitHub 登录状态已失效，请重新登录")
 				login, name = github_identity(self.settings, code, verifier)
 				session_id, _ = self.store.new_session(login, name, True, "github")
-				cookie = f"tsuite_connect_session={session_id}; Path=/connect; Secure; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}"
+				cookie = f"tsuite_connect_session={session_id}; Path=/connect; Secure; HttpOnly; SameSite=Lax; Max-Age={self.settings.session_ttl_seconds}"
 				clear_oauth = f"tsuite_connect_oauth=; Path={urllib.parse.urlsplit(self.settings.callback_url).path}; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
 				return self.redirect(start_response, "/connect/", [("Set-Cookie", cookie), ("Set-Cookie", clear_oauth)])
 			if path == "/invite" and method == "GET":
@@ -1190,8 +1225,11 @@ class Application:
 					)
 					return self.response(start_response, HTTPStatus.OK, page("会话详情", content))
 			return self.response(start_response, HTTPStatus.NOT_FOUND, page("未找到", "<h1>未找到页面</h1>"))
-		except (ConsoleError, ValueError, TypeError):
-			return self.response(start_response, HTTPStatus.BAD_REQUEST, page("操作失败", "<h1>操作失败</h1><p class=\"error\">请求未完成。请刷新后重试；如仍失败，请查看堡垒机服务日志。</p>"))
+		except (ConsoleError, ValueError, TypeError) as error:
+			message = str(error) if isinstance(error, ConsoleError) else "服务返回的数据无效，请联系管理员检查控制服务。"
+			status = error.status if isinstance(error, ConsoleError) else HTTPStatus.BAD_GATEWAY
+			content = f'<h1>操作失败</h1><p class="error" role="alert">{html.escape(message)}</p><a class="button" href="/connect/">返回工作台</a>'
+			return self.response(start_response, status, page("操作失败", content))
 
 
 class QuietHandler(WSGIRequestHandler):
@@ -1202,7 +1240,8 @@ class QuietHandler(WSGIRequestHandler):
 def main() -> int:
 	config_path = pathlib.Path(os.environ.get("TSUITE_SUPPORT_CONSOLE_CONFIG", "/etc/tsuite-connect-console/config.json"))
 	settings = Settings.load(config_path)
-	application = Application(settings)
+	from tsuite_connect_web import WebApplication
+	application = WebApplication(Application(settings), sys.modules[__name__])
 	with contextlib.suppress(ConsoleError):
 		manager("list")
 	with make_server(settings.listen_host, settings.listen_port, application, handler_class=QuietHandler) as server:

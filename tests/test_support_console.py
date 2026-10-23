@@ -157,6 +157,33 @@ class SupportConsoleTest(unittest.TestCase):
 		self.assertIn('href="/connect/login"', content)
 		self.assertIn(("Cache-Control", "no-store"), captured["headers"])
 
+	def test_web_login_survives_next_day_but_has_absolute_expiry(self):
+		store = CONSOLE.Store(self.settings.state_dir)
+		with mock.patch.object(CONSOLE.time, "time", return_value=1_000_000):
+			session_id, _ = store.new_session("alice", "Alice")
+		with mock.patch.object(CONSOLE.time, "time", return_value=1_000_000 + 24 * 3600):
+			self.assertIsNotNone(store.session(session_id))
+		with mock.patch.object(CONSOLE.time, "time", return_value=1_000_000 + 7 * 24 * 3600):
+			self.assertIsNone(store.session(session_id))
+
+	def test_close_error_explains_cleanup_failure_in_browser(self):
+		app = CONSOLE.Application(self.settings)
+		session_id, csrf = app.store.new_session("alice", "Alice")
+		with mock.patch.object(CONSOLE, "manager", side_effect=CONSOLE.ConsoleError("客户侧清理未确认；会话未撤销")):
+			response, content = self.call(app, "/session/012345abcdef/close", method="POST",
+				body=urllib.parse.urlencode({"csrf": csrf}), cookie="tsuite_connect_session=" + session_id)
+		self.assertTrue(response["status"].startswith("400"))
+		self.assertIn("客户侧清理未确认", content)
+
+	def test_github_missing_organization_explains_the_required_organization(self):
+		responses = [{"access_token": "test-token"}, {"login": "alice"}]
+		missing = __import__("urllib.error").error.HTTPError("https://api.github.com/user/memberships/orgs/transinfosh", 404, "Not Found", {}, None)
+		failure = CONSOLE.ConsoleError("GitHub 服务暂时不可用")
+		failure.__cause__ = missing
+		with mock.patch.object(CONSOLE, "github_json", side_effect=[*responses, failure]):
+			with self.assertRaisesRegex(CONSOLE.ConsoleError, "transinfosh"):
+				CONSOLE.github_identity(self.settings, "code", "verifier")
+
 	def test_local_login_asks_for_totp_only_after_password(self):
 		app = CONSOLE.Application(self.local_settings())
 		captured, content = self.call(app, "/")
@@ -615,7 +642,7 @@ class SupportOperatorBrokerTest(unittest.TestCase):
 				pathlib.Path(self.temporary.name) / "customer-known-hosts",
 			)
 
-	def test_close_confirms_customer_cleanup_before_revoking_bastion(self):
+	def test_close_accepts_disconnect_after_cleanup_marker_before_revoking_bastion(self):
 		session_id = "012345abcdef"
 		REMOTE.atomic_write(REMOTE.identity_path(self.settings, session_id), "private")
 		REMOTE.atomic_write(REMOTE.session_state_path(self.settings, session_id), json.dumps({
@@ -636,7 +663,7 @@ class SupportOperatorBrokerTest(unittest.TestCase):
 		def cleanup_run(arguments, input_text=None, env=None):
 			events.append("customer-cleanup")
 			cleanup_environment.update(env or {})
-			return subprocess.CompletedProcess(arguments, 0, f"cleanup-scheduled:{session_id}\n", "")
+			return subprocess.CompletedProcess(arguments, 255, f"cleanup-scheduled:{session_id}\n", "Connection to customer closed")
 
 		def close_remote(settings, *arguments, input_text=None):
 			events.append("bastion-close")

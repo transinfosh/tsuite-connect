@@ -6,3 +6,7 @@ __pycache__/
 *_ed25519
 *.key
 dist/
+node_modules/
+console/static/
+frontend/test-results/
+frontend/playwright-report/
