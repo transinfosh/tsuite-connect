@@ -1,6 +1,5 @@
 import { ChevronDown, Link2, LoaderCircle, LogOut, Monitor, UsersRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,7 +38,7 @@ export default function App() {
   const auth = m.view === 'login' || m.view === 'invite'
   return (
     <TooltipProvider>
-      <div className="min-h-svh">
+      <div className="flex min-h-svh flex-col">
         {auth ? (
           <>
             <div className="mx-auto max-w-lg px-4 pt-4 empty:hidden">
@@ -59,11 +58,7 @@ export default function App() {
                     void m.navigate('/')
                   }}
                 >
-                  <Link2 className="size-5" />
-                  Connect
-                  <Badge variant="outline" className="hidden sm:inline-flex">
-                    TSuite
-                  </Badge>
+                  <Link2 className="size-5" />T Connect
                 </a>
                 <NavigationMenu
                   viewport={false}
@@ -134,7 +129,7 @@ export default function App() {
                 </div>
               </div>
             </header>
-            <main className="mx-auto max-w-7xl space-y-4 px-4 py-4 sm:px-6 sm:py-5">
+            <main className="mx-auto w-full max-w-7xl flex-1 space-y-4 px-4 py-4 sm:px-6 sm:py-5">
               <div data-view-motion className="space-y-4" key={m.view}>
                 {!m.newOpen && !m.closeTarget && (
                   <ErrorNotice error={m.error} dismiss={() => m.setError(null)} />
@@ -149,14 +144,16 @@ export default function App() {
                   <Detail model={m} />
                 )}
               </div>
-              <footer className="flex flex-wrap justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
-                <span>TSuite Connect</span>
-                <span>用完即关，临时授权自动清理。</span>
-              </footer>
             </main>
             <SessionDialogs model={m} />
           </>
         )}
+        <footer className="mt-auto border-t">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-3 text-xs text-muted-foreground sm:px-6">
+            <span>© {new Date().getFullYear()} T Connect. 保留所有权利。</span>
+            <span>用完即关，临时授权自动清理。</span>
+          </div>
+        </footer>
       </div>
     </TooltipProvider>
   )

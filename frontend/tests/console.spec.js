@@ -74,6 +74,7 @@ test('login, close failure and retry, create, OS switching, users and logout sta
   await page.getByRole('button', { name: '返回会话列表', exact: true }).click()
   await expect(page.getByRole('link', { name: createdSessionId })).toBeVisible()
   await page.setViewportSize({ width: 390, height: 844 })
+  await page.mouse.move(1, 800)
   await page.waitForTimeout(250)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
   await page.screenshot({

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowRight, CircleHelp, Laptop, Plus, RefreshCw, Search } from 'lucide-react'
+import { ArrowRight, Laptop, Plus, RefreshCw, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
@@ -13,7 +13,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Status } from './shared'
 import { transition } from '@/lib/transition'
 import type { ConsoleModel } from '@/lib/use-console'
@@ -37,13 +36,13 @@ function SessionId({ session, model: m }: { session: Session; model: ConsoleMode
 }
 function Actions({ session, model: m }: { session: Session; model: ConsoleModel }) {
   return (
-    <div className="flex items-center justify-end gap-1">
-      <Button variant="ghost" size="sm" onClick={() => void m.navigate(`/session/${session.id}`)}>
+    <div className="flex items-center justify-end gap-2">
+      <Button variant="outline" size="sm" onClick={() => void m.navigate(`/session/${session.id}`)}>
         查看详情
       </Button>
       {['issued', 'enrolled'].includes(session.status) && (
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
           disabled={m.busy}
           onClick={() => {
@@ -72,8 +71,6 @@ export function Sessions({ model: m }: { model: ConsoleModel }) {
     }
     return [...result].sort(([a], [b]) => a.localeCompare(b))
   }, [m.sessions, search, filter])
-  const connected = m.sessions.filter((session) => session.status === 'enrolled').length
-  const customers = new Set(m.sessions.map((session) => session.customer)).size
   return (
     <>
       <header className="flex items-center justify-between gap-3">
@@ -92,19 +89,6 @@ export function Sessions({ model: m }: { model: ConsoleModel }) {
           新建会话
         </Button>
       </header>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        <span>{customers} 个客户环境</span>
-        <span>{connected} 个已连接</span>
-        <span>{m.sessions.length - connected} 个等待或处理中</span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-xs" aria-label="会话期限说明">
-              <CircleHelp />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>结束后会话从列表移除，记录保留供审计。</TooltipContent>
-        </Tooltip>
-      </div>
       <Card className="gap-0 overflow-hidden py-0" aria-label="会话列表">
         <CardHeader className="gap-2 border-b px-3 py-2 [.border-b]:pb-2 sm:flex sm:flex-row sm:items-center sm:justify-between">
           <Tabs value={filter} onValueChange={(value) => transition(() => setFilter(value))}>

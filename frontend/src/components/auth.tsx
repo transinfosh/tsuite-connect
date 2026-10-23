@@ -17,12 +17,12 @@ export function Auth({ model: m }: { model: ConsoleModel }) {
     (key: keyof typeof binding) => (event: React.ChangeEvent<HTMLInputElement>) =>
       setBinding({ ...binding, [key]: event.target.value })
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center gap-4 px-4 py-6">
+    <main className="flex flex-1 flex-col items-center justify-center gap-4 px-4 py-6">
       <a href="/connect/" className="flex items-center gap-2 text-lg font-semibold">
         <span className="inline-flex items-center">
           <Link2 />
         </span>
-        Connect
+        T Connect
       </a>
       <Card className="w-full max-w-sm gap-4 py-4">
         <CardContent data-view-motion className="space-y-4 px-4">
@@ -141,7 +141,7 @@ export function Auth({ model: m }: { model: ConsoleModel }) {
                 <p>
                   {m.invite.step === 'complete'
                     ? '密码与动态验证码已设置，现在可以登录。'
-                    : `${m.invite.username}，完成设置即可使用 Connect。`}
+                    : `${m.invite.username}，完成设置即可使用 T Connect。`}
                 </p>
               </div>
               {m.invite.step === 'complete' ? (
