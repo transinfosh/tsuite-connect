@@ -20,7 +20,7 @@ test('primary navigation visibly distinguishes the selected destination after fo
   await expect(sessions).not.toHaveAttribute('aria-current', 'page')
   expect(await background(users)).not.toBe(await background(sessions))
   const footer = page.getByRole('contentinfo')
-  await expect(footer).toContainText('T Connect. 保留所有权利。')
+  await expect(footer).toContainText('tSuite Connect. 保留所有权利。')
   const short = await footer.boundingBox()
   expect(Math.abs(short.y + short.height - 1000)).toBeLessThanOrEqual(1)
   await page.setViewportSize({ width: 390, height: 400 })

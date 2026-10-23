@@ -58,7 +58,7 @@ export default function App() {
                     void m.navigate('/')
                   }}
                 >
-                  <Link2 className="size-5" />T Connect
+                  <Link2 className="size-5" />tSuite Connect
                 </a>
                 <NavigationMenu
                   viewport={false}
@@ -150,7 +150,7 @@ export default function App() {
         )}
         <footer className="mt-auto border-t">
           <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-3 text-xs text-muted-foreground sm:px-6">
-            <span>© {new Date().getFullYear()} T Connect. 保留所有权利。</span>
+            <span>© {new Date().getFullYear()} tSuite Connect. 保留所有权利。</span>
             <span>用完即关，临时授权自动清理。</span>
           </div>
         </footer>

@@ -1,4 +1,4 @@
-# T Connect 控制台 BDD 场景
+# tSuite Connect 控制台 BDD 场景
 
 | 编号 | 场景 | 预期行为 |
 | --- | --- | --- |
