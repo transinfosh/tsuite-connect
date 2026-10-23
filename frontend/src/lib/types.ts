@@ -1,4 +1,5 @@
 export type Platform = 'linux' | 'windows'
+export type PlatformField = 'platform' | 'operator_platform'
 export interface User {
   login: string
   name: string

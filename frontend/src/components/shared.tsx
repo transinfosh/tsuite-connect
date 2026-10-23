@@ -56,7 +56,15 @@ export function ErrorNotice({ error, dismiss }: { error: Failure | null; dismiss
     </Alert>
   )
 }
-export function CopyButton({ value }: { value: string }) {
+export function CopyButton({
+  value,
+  disabled = false,
+  label,
+}: {
+  value: string
+  disabled?: boolean
+  label?: string
+}) {
   const [copied, setCopied] = useState('复制')
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(timer.current), [])
@@ -71,7 +79,14 @@ export function CopyButton({ value }: { value: string }) {
     timer.current = setTimeout(() => setCopied('复制'), 2000)
   }
   return (
-    <Button type="button" variant="outline" size="sm" onClick={copy}>
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      disabled={disabled}
+      aria-label={label}
+      onClick={copy}
+    >
       {copied === '已复制' ? <Check /> : <Copy />}
       <span aria-live="polite">{copied}</span>
     </Button>

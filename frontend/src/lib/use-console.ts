@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { transition } from './transition'
-import type { Account, Commands, Config, Detail, Failure, Invite, Platform, Session } from './types'
+import type {
+  Account,
+  Commands,
+  Config,
+  Detail,
+  Failure,
+  Invite,
+  Platform,
+  PlatformField,
+  Session,
+} from './types'
 
 const currentPath = () => location.pathname.replace(/^\/connect/, '') || '/'
 
@@ -24,6 +34,11 @@ export function useConsole() {
   const routePath = useRef(path)
   const [selected, setSelected] = useState<Detail | null>(null)
   const [commands, setCommands] = useState<Commands | null>(null)
+  const [platformPending, setPlatformPending] = useState<Partial<Record<PlatformField, Platform>>>(
+    {},
+  )
+  const platformQueue = useRef<{ field: PlatformField; value: Platform }[]>([])
+  const switchingPlatforms = useRef(false)
   const [invite, setInvite] = useState<Invite | null>(null)
   const [inviteUrl, setInviteUrl] = useState('')
   const [token, setToken] = useState(() => new URLSearchParams(location.search).get('token') || '')
@@ -268,16 +283,54 @@ export function useConsole() {
       })
     })
   }
-  async function switchPlatform(field: 'platform' | 'operator_platform', value: Platform) {
-    if (!commands || commands[field] === value) return
-    await perform(async () => {
-      const updated = await request<Commands>(`/api/session/${commands.id}/platform`, {
-        ...commands,
-        current_platform: commands.platform,
-        [field]: value,
+  async function switchPlatform(field: PlatformField, value: Platform) {
+    if (
+      !commands ||
+      commands[field] === value ||
+      platformQueue.current.some((job) => job.field === field)
+    )
+      return
+    if (busyRef.current && !switchingPlatforms.current) return
+    platformQueue.current.push({ field, value })
+    setPlatformPending((pending) => ({ ...pending, [field]: value }))
+    if (switchingPlatforms.current) return
+    switchingPlatforms.current = true
+    try {
+      await perform(async () => {
+        // The API accepts both platforms and a version check. Apply independent
+        // choices against the latest confirmed response so neither overwrites the other.
+        let current = commands
+        while (platformQueue.current.length) {
+          const job = platformQueue.current[0]
+          current = await request<Commands>(`/api/session/${current.id}/platform`, {
+            ...current,
+            current_platform: current.platform,
+            [job.field]: job.value,
+          })
+          await transition(() => setCommands(current))
+          platformQueue.current.shift()
+          setPlatformPending((pending) => {
+            const next = { ...pending }
+            delete next[job.field]
+            return next
+          })
+        }
       })
-      await transition(() => setCommands(updated))
-    })
+    } finally {
+      // A failed mutation can have an unknown result; never replay queued choices.
+      if (platformQueue.current.length > 1)
+        setError((failure) =>
+          failure
+            ? {
+                ...failure,
+                message: `${failure.message} 后续系统选择尚未提交，请确认状态后重新选择。`,
+              }
+            : failure,
+        )
+      platformQueue.current = []
+      switchingPlatforms.current = false
+      setPlatformPending({})
+    }
   }
   async function closeSession() {
     if (!closeTarget) return
@@ -328,6 +381,7 @@ export function useConsole() {
     usersLoaded,
     selected,
     commands,
+    platformPending,
     invite,
     inviteUrl,
     authStep,

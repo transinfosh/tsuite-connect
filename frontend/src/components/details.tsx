@@ -1,4 +1,4 @@
-import { RefreshCw, ShieldCheck, Terminal } from 'lucide-react'
+import { LoaderCircle, RefreshCw, ShieldCheck, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -12,7 +12,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Back, CopyButton, Status } from './shared'
-import { statusLabels, type Platform } from '@/lib/types'
+import { statusLabels, type Platform, type PlatformField } from '@/lib/types'
 import type { ConsoleModel } from '@/lib/use-console'
 
 export function Detail({ model: m }: { model: ConsoleModel }) {
@@ -94,28 +94,24 @@ export function Detail({ model: m }: { model: ConsoleModel }) {
 }
 export function CommandsView({ model: m }: { model: ConsoleModel }) {
   const commands = m.commands!
+  const switching = Object.keys(m.platformPending).length > 0
   const sections: {
-    key: 'customer_command' | 'operator_command' | 'ai_instructions'
+    key: 'customer_command' | 'operator_command'
     title: string
     description: string
-    field?: 'platform' | 'operator_platform'
+    field: PlatformField
   }[] = [
     {
       key: 'customer_command',
-      title: '客户执行命令',
-      description: '发送给客户执行。Windows 使用管理员 PowerShell，Linux 需 sudo。',
+      title: '受控机',
+      description: '在需要远程操作的机器上执行。Windows 使用管理员 PowerShell，Linux 需 sudo。',
       field: 'platform',
     },
     {
       key: 'operator_command',
-      title: '支持机执行命令',
-      description: '在你的支持机执行。客户尚未接入时，程序会自动等待。',
+      title: '控制机',
+      description: '在你发起远程操作的机器上执行。受控机尚未接入时，程序会自动等待。',
       field: 'operator_platform',
-    },
-    {
-      key: 'ai_instructions',
-      title: '交给 AI 的操作说明',
-      description: '复制后，在说明末尾补充需要完成的具体任务。',
     },
   ]
   return (
@@ -144,47 +140,95 @@ export function CommandsView({ model: m }: { model: ConsoleModel }) {
       {sections
         .filter((section) => commands[section.key])
         .map((section, index) => (
-          <Card className="gap-3 py-4" key={section.key}>
+          <Card className="gap-3 py-4" key={section.key} role="region" aria-label={section.title}>
             <CardHeader className="gap-2 px-4">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline">{index + 1}</Badge>
-                <CardTitle>{section.title}</CardTitle>
+                <CardTitle>
+                  <h2>{section.title}</h2>
+                </CardTitle>
                 <div className="ml-auto flex flex-wrap items-center gap-2">
-                  {section.field && commands.grant && (
+                  {commands.grant && (
                     <div
                       className="flex items-center gap-1"
+                      role="group"
                       aria-label={`${section.title}操作系统`}
+                      aria-busy={!!m.platformPending[section.field]}
                     >
                       {(['linux', 'windows'] as Platform[]).map((platform) => (
                         <Button
                           key={platform}
-                          variant={commands[section.field!] === platform ? 'secondary' : 'ghost'}
+                          variant={commands[section.field] === platform ? 'secondary' : 'ghost'}
                           size="sm"
-                          aria-pressed={commands[section.field!] === platform}
+                          aria-pressed={commands[section.field] === platform}
                           disabled={
-                            m.busy || (section.field === 'platform' && commands.customer_locked)
+                            (m.busy && !switching) ||
+                            !!m.platformPending[section.field] ||
+                            (section.field === 'platform' && commands.customer_locked)
                           }
-                          onClick={() => m.switchPlatform(section.field!, platform)}
+                          onClick={() => m.switchPlatform(section.field, platform)}
                         >
                           {platform === 'linux' ? 'Linux' : 'Windows'}
                         </Button>
                       ))}
+                      {m.platformPending[section.field] && (
+                        <span role="status" aria-label={`正在切换${section.title}系统`}>
+                          <LoaderCircle className="size-4 animate-spin" />
+                        </span>
+                      )}
                     </div>
                   )}
-                  <CopyButton value={commands[section.key]!} />
+                  <CopyButton
+                    value={commands[section.key]!}
+                    disabled={!!m.platformPending[section.field]}
+                    label={`复制${section.title}命令`}
+                  />
                 </div>
               </div>
               <CardDescription>{section.description}</CardDescription>
             </CardHeader>
-            <CardContent className="px-4">
+            <CardContent className="space-y-4 px-4">
               <pre className="command-code whitespace-pre-wrap break-all rounded-md border bg-muted p-3 font-mono text-xs leading-relaxed">
                 {commands[section.key]}
               </pre>
+              {section.key === 'operator_command' && commands.ai_instructions && (
+                <section
+                  className="space-y-2 border-t pt-3"
+                  aria-labelledby="ai-instructions-title"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 id="ai-instructions-title" className="text-sm font-medium">
+                      交给 AI 的操作说明
+                    </h3>
+                    <CopyButton
+                      value={commands.ai_instructions}
+                      disabled={!!switching}
+                      label="复制 AI 操作说明"
+                    />
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    在控制机上使用。复制后，在说明末尾补充需要完成的具体任务。
+                  </p>
+                  {!!switching && (
+                    <p
+                      className="flex items-center gap-2 text-xs text-muted-foreground"
+                      role="status"
+                      aria-label="正在更新 AI 说明"
+                    >
+                      <LoaderCircle className="size-3 animate-spin" />
+                      正在根据两端系统更新说明…
+                    </p>
+                  )}
+                  <pre className="command-code whitespace-pre-wrap break-all rounded-md border bg-muted p-3 font-mono text-xs leading-relaxed">
+                    {commands.ai_instructions}
+                  </pre>
+                </section>
+              )}
             </CardContent>
             {section.key === 'operator_command' && (
               <CardFooter className="gap-2 px-4 text-xs text-muted-foreground">
                 <Terminal className="size-4 shrink-0" />
-                Windows 支持机需 PowerShell 和 OpenSSH Client，无需管理员权限。
+                Windows 控制机需 PowerShell 和 OpenSSH Client，无需管理员权限。
               </CardFooter>
             )}
           </Card>

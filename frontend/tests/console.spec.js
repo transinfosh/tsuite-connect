@@ -49,29 +49,30 @@ test('login, close failure and retry, create, OS switching, users and logout sta
   await page.getByLabel('客户环境标识', { exact: true }).fill('browser-test-customer')
   await page.getByRole('button', { name: '创建会话', exact: true }).click()
   await expect(page.getByRole('heading', { name: '会话已创建' })).toBeVisible()
+  const createdSessionId = new URL(page.url()).pathname.split('/').at(-1)
   await expect(page.getByText('echo synthetic-customer-command', { exact: true })).toBeVisible()
   await page
-    .getByLabel('客户执行命令操作系统', { exact: true })
+    .getByLabel('受控机操作系统', { exact: true })
     .getByRole('button', { name: 'Windows' })
     .click()
   await expect(
     page.getByText('echo synthetic-windows-customer-command', { exact: true }),
   ).toBeVisible()
   await page
-    .getByLabel('支持机执行命令操作系统', { exact: true })
+    .getByLabel('控制机操作系统', { exact: true })
     .getByRole('button', { name: 'Windows' })
     .click()
   await expect(
-    page.getByLabel('客户执行命令操作系统').getByRole('button', { name: 'Windows' }),
+    page.getByLabel('受控机操作系统').getByRole('button', { name: 'Windows' }),
   ).toHaveAttribute('aria-pressed', 'true')
   await expect(
-    page.getByLabel('支持机执行命令操作系统').getByRole('button', { name: 'Windows' }),
+    page.getByLabel('控制机操作系统').getByRole('button', { name: 'Windows' }),
   ).toHaveAttribute('aria-pressed', 'true')
   expect(await page.evaluate(() => window.__spaIdentity)).toBe('same-page')
   expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0)
   expect(page.url()).not.toContain('synthetic-grant')
   await page.getByRole('button', { name: '返回会话列表', exact: true }).click()
-  await expect(page.getByRole('link', { name: '000000000001' })).toBeVisible()
+  await expect(page.getByRole('link', { name: createdSessionId })).toBeVisible()
   await page.setViewportSize({ width: 390, height: 844 })
   await page.waitForTimeout(250)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
