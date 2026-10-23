@@ -572,7 +572,11 @@ def confirm_session_replacement(
 			raise SupportError("本机登记的会话与新会话相同")
 		existing_session = store.load(existing_session_id)
 		if existing_session["status"] not in {"closed", "expired"}:
-			raise SupportError("本机登记的旧支持会话仍处于活动状态，请先关闭")
+			raise SupportError(
+				f"本机登记的旧支持会话仍处于活动状态（连接 ID：{existing_session_id}，"
+				f"名称：{existing_session.get('customer') or '未命名'}）。"
+				"请在 Connect 的“远程会话”中按此 ID 或名称查找并关闭，再重试。"
+			)
 	return existing_session_id
 
 

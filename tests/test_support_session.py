@@ -193,6 +193,23 @@ class SupportSessionTest(unittest.TestCase):
 			)
 		self.assertEqual(self.store.load("012345abcdef")["status"], "issued")
 
+	def test_active_session_error_identifies_the_connection_to_close(self):
+		token = self.save_issued_session()
+		old_id = "333333333333"
+		self.save_terminal_session(old_id, "closed")
+		old = self.store.load(old_id)
+		old.update(status="enrolled", customer="srm-server", expires_at=int(time.time()) + 3600)
+		self.store.save(old)
+		with self.assertRaises(SUPPORT.SupportError) as failure:
+			SUPPORT.confirm_session_replacement(self.store, token, "012345abcdef", old_id)
+		message = str(failure.exception)
+		self.assertIn(old_id, message)
+		self.assertIn("srm-server", message)
+		self.assertIn("远程会话", message)
+		self.assertNotIn(token, message)
+		self.assertEqual(self.store.load(old_id), old)
+		self.assertEqual(self.store.load("012345abcdef")["status"], "issued")
+
 	def test_settings_reject_missing_bootstrap(self):
 		value = self.settings.__dict__ | {"bootstrap_path": pathlib.Path(self.temporary.name) / "missing"}
 		with self.assertRaises(SUPPORT.SupportError):
