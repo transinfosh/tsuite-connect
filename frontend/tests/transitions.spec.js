@@ -15,18 +15,106 @@ test('refreshing a detail preserves its content while the request is pending', a
   expect(await page.locator('code').filter({ hasText: 'aa11bb22cc33' }).count()).toBe(1)
 })
 
-test('navigation keeps the current view visible until the destination data is ready', async ({
+test('navigation switches immediately and refreshes cached sessions in the background', async ({
   page,
 }) => {
   await login(page)
-  await page.route('**/api/users', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 700))
+  await page.getByRole('link', { name: 'aa11bb22cc33', exact: true }).waitFor()
+  await page.getByRole('link', { name: '用户管理', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '重绑 TOTP' }).first().waitFor()
+  let release
+  const gate = new Promise((resolve) => {
+    release = resolve
+  })
+  await page.route('**/api/sessions', async (route) => {
+    await gate
     await route.continue()
   })
-  await page.getByRole('link', { name: '用户管理', exact: true }).click()
-  await page.waitForTimeout(100)
-  expect(await page.getByRole('heading', { name: '远程会话', exact: true }).count()).toBe(1)
-  await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible()
+  try {
+    const request = page.waitForRequest('**/api/sessions')
+    await page.getByRole('link', { name: '远程会话', exact: true }).click()
+    await request
+    await expect(page.getByRole('heading', { name: '远程会话', exact: true })).toBeVisible({
+      timeout: 1000,
+    })
+    await expect(page).toHaveURL(/\/connect\/$/)
+    await expect(page.getByRole('link', { name: 'aa11bb22cc33', exact: true })).toBeVisible()
+    await expect(page.getByRole('status', { name: '正在加载页面数据' })).toBeVisible()
+  } finally {
+    release()
+  }
+  await expect(page.getByRole('status', { name: '正在加载页面数据' })).toHaveCount(0)
+})
+
+test('first visit shows a skeleton and an abandoned request cannot show an error on another page', async ({
+  page,
+}) => {
+  await login(page)
+  let release
+  const gate = new Promise((resolve) => {
+    release = resolve
+  })
+  await page.route('**/api/users', async (route) => {
+    await gate
+    await route.fulfill({
+      status: 502,
+      json: { error: { code: 'broker_failed', message: 'abandoned-users-request' } },
+    })
+  })
+  try {
+    const request = page.waitForRequest('**/api/users')
+    await page.getByRole('link', { name: '用户管理', exact: true }).click()
+    await request
+    await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible({
+      timeout: 1000,
+    })
+    await expect(page.getByRole('status', { name: '正在加载用户', exact: true })).toBeVisible()
+    await page.getByRole('link', { name: '远程会话', exact: true }).click()
+    await expect(page.getByRole('heading', { name: '远程会话', exact: true })).toBeVisible({
+      timeout: 1000,
+    })
+    const response = page.waitForResponse('**/api/users')
+    release()
+    await response
+    await page.waitForTimeout(100)
+    await expect(page.getByRole('alert')).toHaveCount(0)
+  } finally {
+    release()
+  }
+})
+
+test('late detail data cannot overwrite the newly selected session', async ({ page }) => {
+  await login(page)
+  let release
+  const gate = new Promise((resolve) => {
+    release = resolve
+  })
+  await page.route('**/api/session/aa11bb22cc33', async (route) => {
+    await gate
+    await route.continue()
+  })
+  try {
+    const request = page.waitForRequest('**/api/session/aa11bb22cc33')
+    await page.getByRole('link', { name: 'aa11bb22cc33', exact: true }).click()
+    await request
+    await expect(page.getByRole('heading', { name: '会话详情', exact: true })).toBeVisible({
+      timeout: 1000,
+    })
+    await expect(page.getByRole('status', { name: '正在加载会话详情', exact: true })).toBeVisible()
+    await page.getByRole('link', { name: '远程会话', exact: true }).click()
+    await page.getByRole('link', { name: 'fedcba543210', exact: true }).click()
+    await expect(page.getByRole('heading', { name: '会话详情', exact: true })).toBeVisible()
+    await expect(page.locator('code').filter({ hasText: 'fedcba543210' })).toBeVisible()
+    const response = page.waitForResponse('**/api/session/aa11bb22cc33')
+    release()
+    await response
+    await page.waitForTimeout(100)
+    await expect(page.locator('code').filter({ hasText: 'fedcba543210' })).toBeVisible()
+    await expect(page.locator('code').filter({ hasText: 'aa11bb22cc33' })).toHaveCount(0)
+  } finally {
+    release()
+  }
 })
 
 test('view and filter changes run a short transition; compact rows retain readable controls', async ({

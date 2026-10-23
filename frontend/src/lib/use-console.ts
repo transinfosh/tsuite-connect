@@ -13,13 +13,15 @@ export function useConsole() {
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
   const [loading, setLoading] = useState(false)
-  const refreshing = useRef(false)
   const [sessions, setSessions] = useState<Session[]>([])
   const [users, setUsers] = useState<Account[]>([])
+  const [sessionsLoaded, setSessionsLoaded] = useState(false)
+  const [usersLoaded, setUsersLoaded] = useState(false)
   const [path, setPath] = useState(currentPath)
   const [navigating, setNavigating] = useState<string | null>(null)
-  const navigationSequence = useRef(0)
-  const preparedRoute = useRef<string | null>(null)
+  const routeSequence = useRef(0)
+  const pendingRead = useRef<number | null>(null)
+  const routePath = useRef(path)
   const [selected, setSelected] = useState<Detail | null>(null)
   const [commands, setCommands] = useState<Commands | null>(null)
   const [invite, setInvite] = useState<Invite | null>(null)
@@ -48,10 +50,14 @@ export function useConsole() {
 
   const request = useCallback(
     async <T>(endpoint: string, data?: Record<string, unknown>) => {
+      const identity = configRef.current?.user
       try {
         return await api<T>(endpoint, data, configRef.current?.user?.csrf)
       } catch (failure) {
-        if ((failure as Failure).code === 'login_required') {
+        if (
+          (failure as Failure).code === 'login_required' &&
+          identity === configRef.current?.user
+        ) {
           updateConfig(configRef.current ? { ...configRef.current, user: null } : null)
           setCommands(null)
           setSelected(null)
@@ -61,6 +67,12 @@ export function useConsole() {
           setNewOpen(false)
           setCloseTarget(null)
           setAuthStep('password')
+          routeSequence.current += 1
+          setNavigating(null)
+          setLoading(false)
+          setSessionsLoaded(false)
+          setUsersLoaded(false)
+          setError(failure as Failure)
         }
         throw failure
       }
@@ -85,43 +97,60 @@ export function useConsole() {
     }
   }, [])
 
-  const refresh = useCallback(
+  // Route reads never hold the mutation lock or delay navigation. Responses from
+  // an abandoned route (or a previous identity) cannot update the active screen.
+  const loadRoute = useCallback(
     async (silent = false) => {
-      if (refreshing.current) return
-      refreshing.current = true
-      if (!silent) setLoading(true)
+      if (path !== '/invite' && (!configRef.current?.user || commands)) return
+      if (pendingRead.current === routeSequence.current) return
+      const sequence = ++routeSequence.current
+      pendingRead.current = sequence
+      const identity = configRef.current?.user
+      const current = () =>
+        sequence === routeSequence.current &&
+        routePath.current === path &&
+        identity === configRef.current?.user
+      if (!silent) {
+        setNavigating(path)
+        setLoading(path === '/')
+        setError(null)
+      }
       try {
-        const result = await request<{ sessions: Session[] }>('/api/sessions')
-        // Ignore an outstanding list response after logout or session expiration.
-        if (configRef.current?.user) {
-          setSessions(result.sessions)
-          setLastUpdated(
-            new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-          )
+        if (path === '/invite') {
+          const value = await request<Invite>(`/api/invite?${new URLSearchParams({ token })}`)
+          if (current()) setInvite(value)
+        } else if (path === '/users') {
+          const value = await request<{ users: Account[] }>('/api/users')
+          if (current()) {
+            setUsers(value.users)
+            setUsersLoaded(true)
+          }
+        } else if (path.startsWith('/session/')) {
+          const value = await request<Detail>(`/api${path}`)
+          if (current()) setSelected(value)
+        } else {
+          const value = await request<{ sessions: Session[] }>('/api/sessions')
+          if (current()) {
+            setSessions(value.sessions)
+            setSessionsLoaded(true)
+            setLastUpdated(
+              new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+            )
+          }
         }
       } catch (failure) {
-        setError(failure as Failure)
+        if (current()) setError(failure as Failure)
       } finally {
-        refreshing.current = false
-        setLoading(false)
+        if (current()) {
+          pendingRead.current = null
+          setNavigating(null)
+          setLoading(false)
+        }
       }
     },
-    [request],
+    [path, token, commands, request],
   )
-
-  const loadRoute = useCallback(async () => {
-    setError(null)
-    if (path === '/invite') {
-      await perform(async () =>
-        setInvite(await request<Invite>(`/api/invite?${new URLSearchParams({ token })}`)),
-      )
-    } else if (!configRef.current?.user || commands) return
-    else if (path === '/users')
-      await perform(async () => setUsers((await request<{ users: Account[] }>('/api/users')).users))
-    else if (path.startsWith('/session/')) {
-      await perform(async () => setSelected(await request<Detail>(`/api${path}`)))
-    } else await refresh()
-  }, [path, token, commands, perform, request, refresh])
+  const refresh = useCallback((silent = false) => loadRoute(silent), [loadRoute])
 
   useEffect(() => {
     let active = true
@@ -141,49 +170,31 @@ export function useConsole() {
   }, [updateConfig])
   useEffect(() => {
     if (booting) return
-    if (preparedRoute.current === path) {
-      preparedRoute.current = null
-      return
-    }
     void loadRoute()
+    return () => {
+      routeSequence.current += 1
+    }
   }, [booting, config?.user?.login, loadRoute])
   const navigate = useCallback(
     async (to: string, pushHistory = true) => {
-      if (busyRef.current) return
-      const sequence = ++navigationSequence.current
-      setNavigating(to)
-      setError(null)
-      try {
-        let detail: Detail | null = null
-        let accounts: Account[] | undefined
-        let items: Session[] | undefined
-        if (configRef.current?.user) {
-          if (to === '/users') accounts = (await request<{ users: Account[] }>('/api/users')).users
-          else if (to.startsWith('/session/')) detail = await request<Detail>(`/api${to}`)
-          else if (to === '/')
-            items = (await request<{ sessions: Session[] }>('/api/sessions')).sessions
-        }
-        if (sequence !== navigationSequence.current) return
-        preparedRoute.current = to
-        await transition(() => {
-          setCommands(null)
-          setInviteUrl('')
-          setSelected(detail)
-          if (accounts) setUsers(accounts)
-          if (items) setSessions(items)
-          setPath(to)
-          setToken(new URLSearchParams(location.search).get('token') || '')
-          setNavigating(null)
-          if (pushHistory && location.pathname !== `/connect${to}`)
-            history.pushState({}, '', `/connect${to}`)
-        })
-      } catch (failure) {
-        if (sequence === navigationSequence.current) setError(failure as Failure)
-      } finally {
-        if (sequence === navigationSequence.current) setNavigating(null)
-      }
+      if (busyRef.current || (to === routePath.current && !commands)) return
+      const sequence = ++routeSequence.current
+      await transition(() => {
+        if (sequence !== routeSequence.current) return
+        routePath.current = to
+        setCommands(null)
+        setInviteUrl('')
+        setSelected((detail) => (to === `/session/${detail?.id}` ? detail : null))
+        setPath(to)
+        setToken(new URLSearchParams(location.search).get('token') || '')
+        setNavigating(to)
+        setLoading(to === '/')
+        setError(null)
+        if (pushHistory && location.pathname !== `/connect${to}`)
+          history.pushState({}, '', `/connect${to}`)
+      })
     },
-    [request],
+    [commands],
   )
   useEffect(() => {
     const pop = () => {
@@ -209,11 +220,11 @@ export function useConsole() {
       if (value.step === 'totp') await transition(() => setAuthStep('totp'))
       else {
         const config = await request<Config>('/api/bootstrap')
-        const result = await request<{ sessions: Session[] }>('/api/sessions')
-        preparedRoute.current = '/'
         await transition(() => {
           updateConfig(config)
-          setSessions(result.sessions)
+          routePath.current = '/'
+          setNavigating('/')
+          setLoading(true)
           setPath('/')
           history.replaceState({}, '', '/connect/')
         })
@@ -231,6 +242,12 @@ export function useConsole() {
         setInviteUrl('')
         setSelected(null)
         setAuthStep('password')
+        routeSequence.current += 1
+        routePath.current = '/'
+        setNavigating(null)
+        setLoading(false)
+        setSessionsLoaded(false)
+        setUsersLoaded(false)
         setPath('/')
         history.replaceState({}, '', '/connect/')
       })
@@ -240,6 +257,10 @@ export function useConsole() {
     return perform(async () => {
       const value = await request<Commands>('/api/session', data)
       await transition(() => {
+        routeSequence.current += 1
+        routePath.current = `/session/${value.id}`
+        setNavigating(null)
+        setLoading(false)
         setCommands(value)
         setPath(`/session/${value.id}`)
         setNewOpen(false)
@@ -303,6 +324,8 @@ export function useConsole() {
     setError,
     sessions,
     users,
+    sessionsLoaded,
+    usersLoaded,
     selected,
     commands,
     invite,

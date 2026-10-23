@@ -139,11 +139,17 @@ export function Sessions({ model: m }: { model: ConsoleModel }) {
           </div>
         </CardHeader>
         <CardContent className="px-0">
-          {m.loading && !m.sessions.length ? (
+          {m.loading && !m.sessionsLoaded ? (
             <div className="space-y-2 p-3" role="status" aria-label="正在加载会话">
               <Skeleton className="h-10" />
               <Skeleton className="h-10" />
               <Skeleton className="h-10" />
+            </div>
+          ) : !m.sessionsLoaded ? (
+            <div className="p-3">
+              <Button variant="outline" onClick={() => m.refresh()}>
+                重新加载会话
+              </Button>
             </div>
           ) : groups.length ? (
             <>

@@ -102,6 +102,7 @@ export default function App() {
                   {m.navigating && (
                     <span
                       role="status"
+                      aria-label="正在加载页面数据"
                       className="flex items-center gap-1 text-xs text-muted-foreground"
                     >
                       <LoaderCircle className="size-3 animate-spin" />

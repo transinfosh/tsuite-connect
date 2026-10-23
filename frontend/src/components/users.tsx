@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Card } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import {
@@ -100,59 +101,72 @@ export function Users({ model: m }: { model: ConsoleModel }) {
           </pre>
         </Card>
       )}
-      <Card className="gap-0 overflow-hidden py-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>用户</TableHead>
-              <TableHead>角色</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead className="text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {m.users.map((account) => (
-              <TableRow key={account.username}>
-                <TableCell>
-                  <strong className="block font-medium">{account.display_name}</strong>
-                  <span className="block text-xs text-muted-foreground">{account.username}</span>
-                </TableCell>
-                <TableCell>{account.is_admin ? '管理员' : '操作员'}</TableCell>
-                <TableCell>
-                  <Badge variant={account.enabled ? 'default' : 'outline'}>
-                    {account.enabled ? '已启用' : '已禁用'}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={m.busy}
-                      onClick={() => {
-                        m.setError(null)
-                        setAction({ user: account, name: 'reset-totp' })
-                      }}
-                    >
-                      重绑 TOTP
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={m.busy || account.username === m.user?.login}
-                      onClick={() => {
-                        m.setError(null)
-                        setAction({ user: account, name: 'toggle' })
-                      }}
-                    >
-                      {account.enabled ? '禁用' : '启用'}
-                    </Button>
-                  </div>
-                </TableCell>
+      <Card className="gap-0 overflow-hidden py-0" aria-label="用户列表">
+        {m.navigating && !m.usersLoaded ? (
+          <div className="space-y-2 p-3" role="status" aria-label="正在加载用户">
+            <Skeleton className="h-10" />
+            <Skeleton className="h-10" />
+          </div>
+        ) : !m.usersLoaded ? (
+          <div className="p-3">
+            <Button variant="outline" onClick={() => m.loadRoute()}>
+              重新加载用户
+            </Button>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>用户</TableHead>
+                <TableHead>角色</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead className="text-right">操作</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {m.users.map((account) => (
+                <TableRow key={account.username}>
+                  <TableCell>
+                    <strong className="block font-medium">{account.display_name}</strong>
+                    <span className="block text-xs text-muted-foreground">{account.username}</span>
+                  </TableCell>
+                  <TableCell>{account.is_admin ? '管理员' : '操作员'}</TableCell>
+                  <TableCell>
+                    <Badge variant={account.enabled ? 'default' : 'outline'}>
+                      {account.enabled ? '已启用' : '已禁用'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={m.busy}
+                        onClick={() => {
+                          m.setError(null)
+                          setAction({ user: account, name: 'reset-totp' })
+                        }}
+                      >
+                        重绑 TOTP
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={m.busy || account.username === m.user?.login}
+                        onClick={() => {
+                          m.setError(null)
+                          setAction({ user: account, name: 'toggle' })
+                        }}
+                      >
+                        {account.enabled ? '禁用' : '启用'}
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
       </Card>
       <Dialog
         open={!!action}

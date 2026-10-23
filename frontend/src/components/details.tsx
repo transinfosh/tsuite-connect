@@ -24,13 +24,24 @@ export function Detail({ model: m }: { model: ConsoleModel }) {
           <h1 className="text-xl font-semibold">会话详情</h1>
           <p className="text-sm text-muted-foreground">查看连接状态和会话记录。</p>
         </div>
-        <Button variant="outline" size="sm" disabled={m.busy} onClick={() => m.loadRoute()}>
-          <RefreshCw className={m.busy ? 'animate-spin' : ''} />
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={m.busy || !!m.navigating}
+          onClick={() => m.loadRoute()}
+        >
+          <RefreshCw className={m.navigating ? 'animate-spin' : ''} />
           刷新状态
         </Button>
       </header>
       {!m.selected ? (
-        <Skeleton className="h-64" />
+        m.navigating ? (
+          <Skeleton className="h-64" role="status" aria-label="正在加载会话详情" />
+        ) : (
+          <Button variant="outline" onClick={() => m.loadRoute()}>
+            重新加载详情
+          </Button>
+        )
       ) : (
         <Card className="gap-3 py-4">
           <CardHeader className="flex flex-row items-center justify-between gap-2 px-4">
