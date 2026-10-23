@@ -26,7 +26,7 @@ export function SessionDialogs({ model: m }: { model: ConsoleModel }) {
             <DialogDescription>使用固定的环境标识，每次连接都会生成独立会话。</DialogDescription>
           </DialogHeader>
           <form
-            className="form-stack"
+            className="grid gap-3"
             onSubmit={async (event) => {
               event.preventDefault()
               if (await m.createSession(form)) setForm({ customer: '', purpose: '' })
@@ -81,7 +81,9 @@ export function SessionDialogs({ model: m }: { model: ConsoleModel }) {
               系统会先确认客户侧清理，再撤销连接。正在操作的终端会断开，此操作无法恢复。
             </DialogDescription>
           </DialogHeader>
-          <code className="close-id">{m.closeTarget?.id}</code>
+          <code className="rounded-md border bg-muted p-3 font-mono text-xs">
+            {m.closeTarget?.id}
+          </code>
           <ErrorNotice error={m.error} />
           <DialogFooter>
             <Button variant="outline" disabled={m.busy} onClick={() => m.setCloseTarget(null)}>

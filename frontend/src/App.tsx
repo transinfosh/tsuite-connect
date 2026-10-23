@@ -1,5 +1,6 @@
 import { ChevronDown, Link2, LoaderCircle, LogOut, Monitor, UsersRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,6 +9,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  NavigationMenu,
+  NavigationMenuItem,
+  NavigationMenuLink,
+  NavigationMenuList,
+} from '@/components/ui/navigation-menu'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { useConsole } from '@/lib/use-console'
 import { Auth } from '@/components/auth'
@@ -21,91 +28,113 @@ export default function App() {
   const m = useConsole()
   if (m.booting)
     return (
-      <main className="initial-loading" role="status">
-        <LoaderCircle className="animate-spin" />
+      <main
+        className="flex min-h-svh items-center justify-center gap-2 text-muted-foreground"
+        role="status"
+      >
+        <LoaderCircle className="size-4 animate-spin" />
         正在加载工作台…
       </main>
     )
   const auth = m.view === 'login' || m.view === 'invite'
   return (
     <TooltipProvider>
-      <div className="application">
+      <div className="min-h-svh">
         {auth ? (
           <>
-            <div className="auth-error">
+            <div className="mx-auto max-w-lg px-4 pt-4 empty:hidden">
               <ErrorNotice error={m.error} dismiss={() => m.setError(null)} />
             </div>
             <Auth model={m} />
           </>
         ) : (
           <>
-            <header className="topbar">
-              <div className="topbar-inner">
+            <header className="border-b">
+              <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-1 px-4 py-2 sm:flex-nowrap sm:px-6">
                 <a
-                  className="brand"
+                  className="flex items-center gap-2 font-semibold"
                   href="/connect/"
                   onClick={(event) => {
                     event.preventDefault()
-                    m.navigate('/')
+                    void m.navigate('/')
                   }}
                 >
-                  <span className="brand-symbol">
-                    <Link2 />
-                  </span>
-                  Connect<span className="brand-company">TSuite</span>
+                  <Link2 className="size-5" />
+                  Connect
+                  <Badge variant="outline" className="hidden sm:inline-flex">
+                    TSuite
+                  </Badge>
                 </a>
-                <nav className="main-nav" aria-label="主导航">
-                  <a
-                    href="/connect/"
-                    aria-current={m.view !== 'users' ? 'page' : undefined}
-                    onClick={(event) => {
-                      event.preventDefault()
-                      m.navigate('/')
-                    }}
-                  >
-                    <Monitor />
-                    远程会话
-                  </a>
-                  {m.user?.is_admin && (
-                    <a
-                      href="/connect/users"
-                      aria-current={m.view === 'users' ? 'page' : undefined}
-                      onClick={(event) => {
-                        event.preventDefault()
-                        m.navigate('/users')
-                      }}
+                <NavigationMenu
+                  viewport={false}
+                  aria-label="主导航"
+                  className="order-3 w-full max-w-none flex-none justify-start sm:order-none sm:w-auto sm:max-w-max"
+                >
+                  <NavigationMenuList className="justify-start">
+                    {[
+                      { to: '/', label: '远程会话', icon: Monitor },
+                      ...(m.user?.is_admin
+                        ? [{ to: '/users', label: '用户管理', icon: UsersRound }]
+                        : []),
+                    ].map((item) => (
+                      <NavigationMenuItem key={item.to}>
+                        <NavigationMenuLink
+                          asChild
+                          active={item.to === '/users' ? m.view === 'users' : m.view !== 'users'}
+                        >
+                          <a
+                            className="flex-row items-center gap-2 whitespace-nowrap"
+                            href={`/connect${item.to}`}
+                            onClick={(event) => {
+                              event.preventDefault()
+                              void m.navigate(item.to)
+                            }}
+                          >
+                            <item.icon />
+                            {item.label}
+                          </a>
+                        </NavigationMenuLink>
+                      </NavigationMenuItem>
+                    ))}
+                  </NavigationMenuList>
+                </NavigationMenu>
+                <div className="ml-auto flex items-center gap-2">
+                  {m.navigating && (
+                    <span
+                      role="status"
+                      className="flex items-center gap-1 text-xs text-muted-foreground"
                     >
-                      <UsersRound />
-                      用户管理
-                    </a>
+                      <LoaderCircle className="size-3 animate-spin" />
+                      <span className="hidden sm:inline">正在加载…</span>
+                    </span>
                   )}
-                </nav>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="profile-button" aria-label="账户菜单">
-                      <span className="profile-avatar">
-                        {(m.user?.name || m.user?.login || '').slice(0, 1).toUpperCase()}
-                      </span>
-                      <span className="profile-name">{m.user?.name || m.user?.login}</span>
-                      <ChevronDown />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuLabel>
-                      {m.user?.login}
-                      <span className="account-role">{m.user?.is_admin ? '管理员' : '操作员'}</span>
-                    </DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem disabled={m.busy} onSelect={() => void m.logout()}>
-                      <LogOut />
-                      退出登录
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm" aria-label="账户菜单">
+                        <span className="hidden sm:inline">{m.user?.name || m.user?.login}</span>
+                        <span className="sm:hidden">账户</span>
+                        <ChevronDown />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuLabel>
+                        {m.user?.login}
+                        <p className="text-xs font-normal text-muted-foreground">
+                          {m.user?.is_admin ? '管理员' : '操作员'}
+                        </p>
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem disabled={m.busy} onSelect={() => void m.logout()}>
+                        <LogOut />
+                        退出登录
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
             </header>
-            <main className="workspace">
-              <div className="workspace-body">
+            <main className="mx-auto max-w-7xl space-y-4 px-4 py-4 sm:px-6 sm:py-5">
+              <div data-view-motion className="space-y-4" key={m.view}>
                 {!m.newOpen && !m.closeTarget && (
                   <ErrorNotice error={m.error} dismiss={() => m.setError(null)} />
                 )}
@@ -119,7 +148,7 @@ export default function App() {
                   <Detail model={m} />
                 )}
               </div>
-              <footer className="workspace-footer">
+              <footer className="flex flex-wrap justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
                 <span>TSuite Connect</span>
                 <span>用完即关，临时授权自动清理。</span>
               </footer>

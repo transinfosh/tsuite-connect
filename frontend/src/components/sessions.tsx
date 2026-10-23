@@ -2,12 +2,61 @@ import { useMemo, useState } from 'react'
 import { ArrowRight, CircleHelp, Laptop, Plus, RefreshCw, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Status } from './shared'
+import { transition } from '@/lib/transition'
 import type { ConsoleModel } from '@/lib/use-console'
 import type { Session } from '@/lib/types'
 
+function SessionId({ session, model: m }: { session: Session; model: ConsoleModel }) {
+  return (
+    <Button variant="link" size="sm" asChild className="h-auto p-0">
+      <a
+        href={`/connect/session/${session.id}`}
+        onClick={(event) => {
+          event.preventDefault()
+          void m.navigate(`/session/${session.id}`)
+        }}
+      >
+        <code>{session.id}</code>
+        <ArrowRight />
+      </a>
+    </Button>
+  )
+}
+function Actions({ session, model: m }: { session: Session; model: ConsoleModel }) {
+  return (
+    <div className="flex items-center justify-end gap-1">
+      <Button variant="ghost" size="sm" onClick={() => void m.navigate(`/session/${session.id}`)}>
+        查看详情
+      </Button>
+      {['issued', 'enrolled'].includes(session.status) && (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={m.busy}
+          onClick={() => {
+            m.setError(null)
+            m.setCloseTarget(session)
+          }}
+        >
+          关闭会话
+        </Button>
+      )}
+    </div>
+  )
+}
 export function Sessions({ model: m }: { model: ConsoleModel }) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
@@ -24,15 +73,16 @@ export function Sessions({ model: m }: { model: ConsoleModel }) {
     return [...result].sort(([a], [b]) => a.localeCompare(b))
   }, [m.sessions, search, filter])
   const connected = m.sessions.filter((session) => session.status === 'enrolled').length
-  const totalCustomers = new Set(m.sessions.map((session) => session.customer)).size
+  const customers = new Set(m.sessions.map((session) => session.customer)).size
   return (
     <>
-      <header className="page-header">
-        <div>
-          <h1>远程会话</h1>
-          <p>连接客户环境，轻松完成远程支持。</p>
+      <header className="flex items-center justify-between gap-3">
+        <div className="space-y-1">
+          <h1 className="text-xl font-semibold">远程会话</h1>
+          <p className="text-sm text-muted-foreground">连接客户环境，完成远程支持。</p>
         </div>
         <Button
+          size="sm"
           onClick={() => {
             m.setError(null)
             m.setNewOpen(true)
@@ -42,59 +92,35 @@ export function Sessions({ model: m }: { model: ConsoleModel }) {
           新建会话
         </Button>
       </header>
-      <div className="overview">
-        <span>
-          <strong>{totalCustomers}</strong> 个客户环境
-        </span>
-        <span className="overview-divider" />
-        <span>
-          <i className="online-dot" />
-          <strong>{connected}</strong> 个已连接
-        </span>
-        <span>
-          <strong>{m.sessions.length - connected}</strong> 个等待或处理中
-        </span>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span>{customers} 个客户环境</span>
+        <span>{connected} 个已连接</span>
+        <span>{m.sessions.length - connected} 个等待或处理中</span>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" aria-label="会话期限说明">
+            <Button variant="ghost" size="icon-xs" aria-label="会话期限说明">
               <CircleHelp />
             </Button>
           </TooltipTrigger>
           <TooltipContent>结束后会话从列表移除，记录保留供审计。</TooltipContent>
         </Tooltip>
       </div>
-      <section className="session-panel" aria-label="会话列表">
-        <div className="list-toolbar">
-          <div className="status-filters" aria-label="筛选会话">
-            <Button
-              variant={filter === 'all' ? 'secondary' : 'ghost'}
-              size="sm"
-              aria-pressed={filter === 'all'}
-              onClick={() => setFilter('all')}
-            >
-              全部会话<span className="filter-count">{m.sessions.length}</span>
-            </Button>
-            <Button
-              variant={filter === 'enrolled' ? 'secondary' : 'ghost'}
-              size="sm"
-              aria-pressed={filter === 'enrolled'}
-              onClick={() => setFilter('enrolled')}
-            >
-              已连接
-            </Button>
-            <Button
-              variant={filter === 'issued' ? 'secondary' : 'ghost'}
-              size="sm"
-              aria-pressed={filter === 'issued'}
-              onClick={() => setFilter('issued')}
-            >
-              等待客户
-            </Button>
-          </div>
-          <div className="search-tools">
-            <div className="search-field">
-              <Search />
+      <Card className="gap-0 overflow-hidden py-0" aria-label="会话列表">
+        <CardHeader className="gap-2 border-b px-3 py-2 [.border-b]:pb-2 sm:flex sm:flex-row sm:items-center sm:justify-between">
+          <Tabs value={filter} onValueChange={(value) => transition(() => setFilter(value))}>
+            <TabsList aria-label="筛选会话">
+              <TabsTrigger value="all">
+                全部会话 <span className="text-xs">{m.sessions.length}</span>
+              </TabsTrigger>
+              <TabsTrigger value="enrolled">已连接</TabsTrigger>
+              <TabsTrigger value="issued">等待客户</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 sm:w-56">
+              <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
               <Input
+                className="pl-8"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="搜索客户或会话 ID"
@@ -111,102 +137,111 @@ export function Sessions({ model: m }: { model: ConsoleModel }) {
               <RefreshCw className={m.loading ? 'animate-spin' : ''} />
             </Button>
           </div>
-        </div>
-        {m.loading && !m.sessions.length ? (
-          <div className="loading-list" role="status" aria-label="正在加载会话">
-            <Skeleton />
-            <Skeleton />
-            <Skeleton />
-          </div>
-        ) : groups.length ? (
-          <div className="customer-groups">
-            {groups.map(([customer, sessions]) => (
-              <section className="customer-group" key={customer}>
-                <div className="group-heading">
-                  <Laptop />
-                  <h2>{customer}</h2>
-                  <span>{sessions.length} 个会话</span>
-                </div>
-                <div className="column-heading" aria-hidden="true">
-                  <span>会话 ID</span>
-                  <span>连接状态</span>
-                  <span>回环端口</span>
-                  <span>操作</span>
-                </div>
-                {sessions.map((session) => (
-                  <div className="session-row" key={session.id}>
-                    <a
-                      className="session-id"
-                      href={`/connect/session/${session.id}`}
-                      onClick={(event) => {
-                        event.preventDefault()
-                        m.navigate(`/session/${session.id}`)
-                      }}
-                    >
-                      {session.id}
-                      <ArrowRight />
-                    </a>
-                    <div className="session-status">
-                      <Status status={session.status} />
+        </CardHeader>
+        <CardContent className="px-0">
+          {m.loading && !m.sessions.length ? (
+            <div className="space-y-2 p-3" role="status" aria-label="正在加载会话">
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+            </div>
+          ) : groups.length ? (
+            <>
+              <div className="hidden sm:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="pl-4">会话 ID</TableHead>
+                      <TableHead>连接状态</TableHead>
+                      <TableHead>回环端口</TableHead>
+                      <TableHead className="pr-4 text-right">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {groups.flatMap(([customer, sessions]) => [
+                      <TableRow key={customer} className="bg-muted/50">
+                        <TableCell colSpan={4} className="px-4 py-2">
+                          <div className="flex items-center gap-2">
+                            <Laptop className="size-4 text-muted-foreground" />
+                            <h2 className="text-sm font-medium">{customer}</h2>
+                            <span className="ml-auto text-xs text-muted-foreground">
+                              {sessions.length} 个会话
+                            </span>
+                          </div>
+                        </TableCell>
+                      </TableRow>,
+                      ...sessions.map((session) => (
+                        <TableRow key={session.id}>
+                          <TableCell className="pl-4">
+                            <SessionId session={session} model={m} />
+                          </TableCell>
+                          <TableCell>
+                            <Status status={session.status} />
+                          </TableCell>
+                          <TableCell className="font-mono text-xs text-muted-foreground">
+                            {session.remote_port}
+                          </TableCell>
+                          <TableCell className="pr-2">
+                            <Actions session={session} model={m} />
+                          </TableCell>
+                        </TableRow>
+                      )),
+                    ])}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="divide-y sm:hidden">
+                {groups.map(([customer, sessions]) => (
+                  <section key={customer}>
+                    <div className="flex items-center gap-2 bg-muted/50 px-3 py-2">
+                      <Laptop className="size-4 shrink-0 text-muted-foreground" />
+                      <h2 className="min-w-0 text-sm font-medium wrap-anywhere">{customer}</h2>
+                      <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                        {sessions.length} 个会话
+                      </span>
                     </div>
-                    <div className="session-port">
-                      <span>回环端口 </span>
-                      {session.remote_port}
+                    <div className="divide-y">
+                      {sessions.map((session) => (
+                        <div key={session.id} className="space-y-2 px-3 py-2">
+                          <SessionId session={session} model={m} />
+                          <div className="flex items-center justify-between">
+                            <Status status={session.status} />
+                            <span className="text-xs text-muted-foreground">
+                              回环端口 {session.remote_port}
+                            </span>
+                          </div>
+                          <Actions session={session} model={m} />
+                        </div>
+                      ))}
                     </div>
-                    <div className="session-actions">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => m.navigate(`/session/${session.id}`)}
-                      >
-                        查看详情
-                      </Button>
-                      {['issued', 'enrolled'].includes(session.status) && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="close-session"
-                          disabled={m.busy}
-                          onClick={() => {
-                            m.setError(null)
-                            m.setCloseTarget(session)
-                          }}
-                        >
-                          关闭会话
-                        </Button>
-                      )}
-                    </div>
-                  </div>
+                  </section>
                 ))}
-              </section>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state">
-            <span className="empty-symbol">
-              <Laptop />
-            </span>
-            <h2>{search || filter !== 'all' ? '没有匹配的会话' : '从一次连接开始'}</h2>
-            <p>
-              {search || filter !== 'all'
-                ? '试试其他搜索内容或连接状态。'
-                : '创建一个会话，把接入命令发送给客户。'}
-            </p>
-            {!search && filter === 'all' && (
-              <Button variant="outline" onClick={() => m.setNewOpen(true)}>
-                <Plus />
-                创建第一个会话
-              </Button>
-            )}
-          </div>
-        )}
-      </section>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center gap-2 px-4 py-10">
+              <Laptop className="mb-1 size-6 text-muted-foreground" />
+              <h2 className="font-medium">
+                {search || filter !== 'all' ? '没有匹配的会话' : '从一次连接开始'}
+              </h2>
+              <p className="text-center text-sm text-muted-foreground">
+                {search || filter !== 'all'
+                  ? '试试其他搜索内容或连接状态。'
+                  : '创建一个会话，把接入命令发送给客户。'}
+              </p>
+              {!search && filter === 'all' && (
+                <Button variant="outline" size="sm" onClick={() => m.setNewOpen(true)}>
+                  <Plus />
+                  创建第一个会话
+                </Button>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
       {m.lastUpdated && (
-        <div className="list-footer">
-          <span>
-            <span className="online-dot" />
-            自动更新已开启
-          </span>
+        <div className="flex justify-between gap-2 text-xs text-muted-foreground">
+          <span>每 15 秒自动更新</span>
           <span>最近更新 {m.lastUpdated}</span>
         </div>
       )}

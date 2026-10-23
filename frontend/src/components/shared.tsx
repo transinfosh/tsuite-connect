@@ -1,19 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, ArrowLeft, Check, Copy, LoaderCircle, X } from 'lucide-react'
+import {
+  AlertCircle,
+  ArrowLeft,
+  Check,
+  CheckCircle2,
+  Clock,
+  Copy,
+  LoaderCircle,
+  X,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { DialogContent } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { cn } from '@/lib/utils'
 import { statusLabels, type Failure } from '@/lib/types'
 import type { ComponentProps, ReactNode } from 'react'
 
 export function Status({ status }: { status: string }) {
+  const Icon = status === 'enrolled' ? CheckCircle2 : status === 'revoking' ? LoaderCircle : Clock
   return (
-    <Badge variant="outline" className={cn('status-badge', `status-${status}`)}>
-      <span className="status-dot" />
+    <Badge
+      variant={status === 'enrolled' ? 'default' : status === 'issued' ? 'secondary' : 'outline'}
+    >
+      <Icon className={status === 'revoking' ? 'animate-spin' : undefined} />
       {statusLabels[status] || status}
     </Badge>
   )
@@ -21,16 +32,19 @@ export function Status({ status }: { status: string }) {
 export function ErrorNotice({ error, dismiss }: { error: Failure | null; dismiss?: () => void }) {
   if (!error) return null
   return (
-    <Alert variant="destructive" className="error-notice">
+    <Alert
+      variant="destructive"
+      className="relative pr-12 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150"
+    >
       <AlertCircle />
       <AlertTitle>操作未完成</AlertTitle>
       <AlertDescription>
         <p>{error.message}</p>
-        {error.request_id && <p className="diagnostic">诊断编号：{error.request_id}</p>}
+        {error.request_id && <p className="text-xs">诊断编号：{error.request_id}</p>}
       </AlertDescription>
       {dismiss && (
         <Button
-          className="dismiss"
+          className="absolute top-2 right-2"
           size="icon-sm"
           variant="ghost"
           aria-label="关闭错误提示"
@@ -70,10 +84,10 @@ export function Field({
   ...props
 }: ComponentProps<typeof Input> & { label: string; hint?: string }) {
   return (
-    <div className="field">
+    <div className="grid gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Input {...props} id={id} />
-      {hint && <p className="field-hint">{hint}</p>}
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
     </div>
   )
 }
@@ -87,7 +101,7 @@ export function Busy({ active, children }: { active: boolean; children: ReactNod
 }
 export function Back({ onClick }: { onClick: () => void }) {
   return (
-    <Button data-back-button variant="ghost" size="sm" className="back-button" onClick={onClick}>
+    <Button data-back-button variant="ghost" size="sm" className="-ml-2 w-fit" onClick={onClick}>
       <ArrowLeft />
       返回会话列表
     </Button>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api'
+import { transition } from './transition'
 import type { Account, Commands, Config, Detail, Failure, Invite, Platform, Session } from './types'
 
 const currentPath = () => location.pathname.replace(/^\/connect/, '') || '/'
@@ -16,6 +17,9 @@ export function useConsole() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [users, setUsers] = useState<Account[]>([])
   const [path, setPath] = useState(currentPath)
+  const [navigating, setNavigating] = useState<string | null>(null)
+  const navigationSequence = useRef(0)
+  const preparedRoute = useRef<string | null>(null)
   const [selected, setSelected] = useState<Detail | null>(null)
   const [commands, setCommands] = useState<Commands | null>(null)
   const [invite, setInvite] = useState<Invite | null>(null)
@@ -115,7 +119,6 @@ export function useConsole() {
     else if (path === '/users')
       await perform(async () => setUsers((await request<{ users: Account[] }>('/api/users')).users))
     else if (path.startsWith('/session/')) {
-      setSelected(null)
       await perform(async () => setSelected(await request<Detail>(`/api${path}`)))
     } else await refresh()
   }, [path, token, commands, perform, request, refresh])
@@ -137,18 +140,58 @@ export function useConsole() {
     }
   }, [updateConfig])
   useEffect(() => {
-    if (!booting) void loadRoute()
+    if (booting) return
+    if (preparedRoute.current === path) {
+      preparedRoute.current = null
+      return
+    }
+    void loadRoute()
   }, [booting, config?.user?.login, loadRoute])
+  const navigate = useCallback(
+    async (to: string, pushHistory = true) => {
+      if (busyRef.current) return
+      const sequence = ++navigationSequence.current
+      setNavigating(to)
+      setError(null)
+      try {
+        let detail: Detail | null = null
+        let accounts: Account[] | undefined
+        let items: Session[] | undefined
+        if (configRef.current?.user) {
+          if (to === '/users') accounts = (await request<{ users: Account[] }>('/api/users')).users
+          else if (to.startsWith('/session/')) detail = await request<Detail>(`/api${to}`)
+          else if (to === '/')
+            items = (await request<{ sessions: Session[] }>('/api/sessions')).sessions
+        }
+        if (sequence !== navigationSequence.current) return
+        preparedRoute.current = to
+        await transition(() => {
+          setCommands(null)
+          setInviteUrl('')
+          setSelected(detail)
+          if (accounts) setUsers(accounts)
+          if (items) setSessions(items)
+          setPath(to)
+          setToken(new URLSearchParams(location.search).get('token') || '')
+          setNavigating(null)
+          if (pushHistory && location.pathname !== `/connect${to}`)
+            history.pushState({}, '', `/connect${to}`)
+        })
+      } catch (failure) {
+        if (sequence === navigationSequence.current) setError(failure as Failure)
+      } finally {
+        if (sequence === navigationSequence.current) setNavigating(null)
+      }
+    },
+    [request],
+  )
   useEffect(() => {
     const pop = () => {
-      setCommands(null)
-      setInviteUrl('')
-      setPath(currentPath())
-      setToken(new URLSearchParams(location.search).get('token') || '')
+      void navigate(currentPath(), false)
     }
     window.addEventListener('popstate', pop)
     return () => window.removeEventListener('popstate', pop)
-  }, [])
+  }, [navigate])
   useEffect(() => {
     if (!config?.user || view !== 'dashboard') return
     const poll = setInterval(() => {
@@ -157,62 +200,62 @@ export function useConsole() {
     return () => clearInterval(poll)
   }, [config?.user, view, newOpen, closeTarget, refresh])
 
-  function navigate(to: string) {
-    if (busyRef.current) return
-    setCommands(null)
-    setInviteUrl('')
-    setPath(to)
-    history.pushState({}, '', `/connect${to}`)
-    // Clicking the current navigation item should still refresh its data.
-    if (to === path && !commands) void loadRoute()
-  }
   async function login(credentials: { username: string; password: string; totp: string }) {
     return perform(async () => {
       const value = await request<{ step: string }>(
         authStep === 'totp' ? '/login/local/totp' : '/login/local',
         credentials,
       )
-      if (value.step === 'totp') setAuthStep('totp')
+      if (value.step === 'totp') await transition(() => setAuthStep('totp'))
       else {
-        updateConfig(await request<Config>('/api/bootstrap'))
-        setPath('/')
-        history.replaceState({}, '', '/connect/')
+        const config = await request<Config>('/api/bootstrap')
+        const result = await request<{ sessions: Session[] }>('/api/sessions')
+        preparedRoute.current = '/'
+        await transition(() => {
+          updateConfig(config)
+          setSessions(result.sessions)
+          setPath('/')
+          history.replaceState({}, '', '/connect/')
+        })
       }
     })
   }
   async function logout() {
     await perform(async () => {
       await request('/api/logout', {})
-      updateConfig(configRef.current ? { ...configRef.current, user: null } : null)
-      setCommands(null)
-      setSessions([])
-      setUsers([])
-      setInviteUrl('')
-      setSelected(null)
-      setAuthStep('password')
-      setPath('/')
-      history.replaceState({}, '', '/connect/')
+      await transition(() => {
+        updateConfig(configRef.current ? { ...configRef.current, user: null } : null)
+        setCommands(null)
+        setSessions([])
+        setUsers([])
+        setInviteUrl('')
+        setSelected(null)
+        setAuthStep('password')
+        setPath('/')
+        history.replaceState({}, '', '/connect/')
+      })
     })
   }
   async function createSession(data: { customer: string; purpose: string }) {
     return perform(async () => {
       const value = await request<Commands>('/api/session', data)
-      setCommands(value)
-      setPath(`/session/${value.id}`)
-      setNewOpen(false)
-      history.pushState({}, '', `/connect/session/${value.id}`)
+      await transition(() => {
+        setCommands(value)
+        setPath(`/session/${value.id}`)
+        setNewOpen(false)
+        history.pushState({}, '', `/connect/session/${value.id}`)
+      })
     })
   }
   async function switchPlatform(field: 'platform' | 'operator_platform', value: Platform) {
     if (!commands || commands[field] === value) return
     await perform(async () => {
-      setCommands(
-        await request<Commands>(`/api/session/${commands.id}/platform`, {
-          ...commands,
-          current_platform: commands.platform,
-          [field]: value,
-        }),
-      )
+      const updated = await request<Commands>(`/api/session/${commands.id}/platform`, {
+        ...commands,
+        current_platform: commands.platform,
+        [field]: value,
+      })
+      await transition(() => setCommands(updated))
     })
   }
   async function closeSession() {
@@ -228,9 +271,10 @@ export function useConsole() {
   }
   async function submitInvite(data: { password: string; confirm_password: string; totp: string }) {
     if (!invite) return false
-    return perform(async () =>
-      setInvite(await request<Invite>(`/api/invite/${invite.step}`, { token, ...data })),
-    )
+    return perform(async () => {
+      const value = await request<Invite>(`/api/invite/${invite.step}`, { token, ...data })
+      await transition(() => setInvite(value))
+    })
   }
   async function inviteUser(data: { username: string; display_name: string; role: string }) {
     await perform(async () =>
@@ -254,6 +298,7 @@ export function useConsole() {
     booting,
     busy,
     loading,
+    navigating,
     error,
     setError,
     sessions,
