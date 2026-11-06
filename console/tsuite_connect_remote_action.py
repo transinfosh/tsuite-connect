@@ -372,6 +372,19 @@ def windows_cleanup(session_id: str) -> str:
 	)
 
 
+def customer_login_arguments(remote, session_id):
+	if "customer_ssh_user" not in remote:
+		return [f"tsuite-ops-{session_id[:8]}@127.0.0.1"]
+	user = remote["customer_ssh_user"]
+	if remote.get("platform") != "windows" or (not isinstance(user, str) or not user or len(user) > 256 or user.strip() != user
+		or re.search(r"""[\x00-\x1f\x7f'`";&<>|(){}$\\*/?\[\]!]""", user)
+		or re.search(r"(^-|\s-)", user)
+		or ("@" in user and (user.count("@") != 1 or not user.split("@")[0]
+			or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", user.split("@")[1])))):
+		raise RemoteActionError("Invalid Windows customer SSH user.")
+	return ["-l", user, "127.0.0.1"]
+
+
 def customer_ssh_args(
 	settings: Settings,
 	session_id: str,
@@ -404,7 +417,7 @@ def customer_ssh_args(
 		"-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1",
 		"-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3",
 		"-o", f"ProxyCommand={proxy_command}", "-p", str(port),
-		f"tsuite-ops-{session_id[:8]}@127.0.0.1",
+		*customer_login_arguments(remote, session_id),
 	]
 
 

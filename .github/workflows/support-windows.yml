@@ -41,9 +41,12 @@ jobs:
         run: |
           ./tests/test_windows_client.ps1
           ./tests/test_windows_cleanup.ps1
+          ./tests/test_windows_identity.ps1
           ./tests/test_windows_lease.ps1
           ./tests/test_windows_diagnostics.ps1
           ./tests/test_windows_permissions.ps1
           ./tests/test_windows_operator.ps1
           ./tests/test_windows_openssh_auth.ps1 -OpenSshDirectory "$env:RUNNER_TEMP/OpenSSH-8.1/OpenSSH-Win64"
           ./tests/test_windows_openssh_auth.ps1 -OpenSshDirectory "$env:RUNNER_TEMP/OpenSSH-9.8.3/OpenSSH-Win64" -CompatibilityRuntime
+          ./tests/test_windows_existing_auth.ps1 -OpenSshDirectory "$env:RUNNER_TEMP/OpenSSH-8.1/OpenSSH-Win64"
+          ./tests/test_windows_existing_auth.ps1 -OpenSshDirectory "$env:RUNNER_TEMP/OpenSSH-9.8.3/OpenSSH-Win64" -CompatibilityRuntime

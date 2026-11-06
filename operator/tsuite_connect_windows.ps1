@@ -252,6 +252,24 @@ function Wait-OperatorCustomer([string]$Root, $Settings, $Tools) {
     }
 }
 
+function Get-OperatorCustomerLoginArguments($Remote, [string]$Id) {
+    $property = $Remote.PSObject.Properties['customer_ssh_user']
+    if (-not $property) { return @("tsuite-ops-$($Id.Substring(0, 8))@127.0.0.1") }
+    $value = $property.Value
+    if ((Get-OperatorProperty $Remote 'platform') -cne 'windows' -or $value -isnot [string] -or
+        $value.Length -eq 0 -or $value.Length -gt 256 -or $value -cne $value.Trim() -or
+        $value -cmatch '[\x00-\x1f\x7f''`";&<>|(){}$\\*/?\[\]!]' -or $value -cmatch '(^-|\s-)') {
+        throw 'Invalid Windows customer SSH user.'
+    }
+    if ($value.Contains('@')) {
+        $parts=$value.Split('@')
+        if ($parts.Count -ne 2 -or -not $parts[0] -or $parts[1] -cnotmatch '^[A-Za-z0-9][A-Za-z0-9.-]*$') {
+            throw 'Invalid Windows customer SSH user.'
+        }
+    }
+    return @('-l', $value, '127.0.0.1')
+}
+
 function Get-OperatorCustomerArguments([string]$Root, $Settings, $Remote, $Tools) {
     $hostLine = "[127.0.0.1]:$($Remote.remote_port) $($Remote.customer_host_key)`n"
     $hosts = Join-Path $Root 'customer_known_hosts'
@@ -262,7 +280,7 @@ function Get-OperatorCustomerArguments([string]$Root, $Settings, $Remote, $Tools
     $proxy = [TSuiteConnect.WindowsRelay]::Quote($Tools.Ssh) + ' ' + [TSuiteConnect.WindowsRelay]::Arguments([string[]]$edge)
     $path = $hosts.Replace('\', '/')
     return @((Get-OperatorSshOptions $Root)) + @('-o', "UserKnownHostsFile=`"$path`"", '-o', "ProxyCommand=$proxy",
-        '-p', [string]$Remote.remote_port, "tsuite-ops-$($Settings.id.Substring(0, 8))@127.0.0.1")
+        '-p', [string]$Remote.remote_port) + @(Get-OperatorCustomerLoginArguments $Remote $Settings.id)
 }
 
 function ConvertTo-OperatorRemoteCommand([string]$Platform, [string]$Value) {

@@ -85,6 +85,19 @@ try {
         [string[]](@('-G') + @(Get-OperatorEdgeArguments $script:testRoot $settings)), 20000)
     Assert-True ($edge.Output.Contains("identityfile $normalized/identity")) 'Edge identity path with spaces was split.'
     Assert-True ($edge.Output.Contains('hostname edge.example.com')) 'Edge host mismatch.'
+    $remote | Add-Member -NotePropertyName platform -NotePropertyValue 'windows'
+    $remote | Add-Member -NotePropertyName customer_ssh_user -NotePropertyValue 'operator@corp.example'
+    $bound = [string[]](Get-OperatorCustomerArguments $script:testRoot $settings $remote $tools)
+    Assert-True ($bound[-3] -eq '-l' -and $bound[-2] -ceq 'operator@corp.example' -and $bound[-1] -eq '127.0.0.1') 'Bound Windows account must be passed as an independent SSH argument.'
+    $boundConfig = [TSuiteConnect.WindowsRelay]::Capture($tools.Ssh,[string[]](@('-G')+$bound),20000)
+    Assert-True ($boundConfig.ExitCode -eq 0 -and $boundConfig.Output.Contains('user operator@corp.example')) 'Native SSH split or changed the bound Windows account.'
+    foreach ($invalid in @('', '*', 'a@@host', $null)) {
+        $remote.customer_ssh_user = $invalid
+        Assert-Rejected { Get-OperatorCustomerArguments $script:testRoot $settings $remote $tools } 'Invalid Windows account metadata accepted.'
+    }
+    $remote.customer_ssh_user = 'administrator';$remote.platform='linux'
+    Assert-Rejected { Get-OperatorCustomerArguments $script:testRoot $settings $remote $tools } 'Windows account routing accepted for Linux.'
+    $remote.PSObject.Properties.Remove('customer_ssh_user')
     $remote.customer_host_key = 'ssh-ed25519 BBBB'
     Assert-Rejected { Get-OperatorCustomerArguments $script:testRoot $settings $remote $tools } 'Changed customer host key accepted.'
 
