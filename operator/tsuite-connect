@@ -112,6 +112,19 @@ def windows_cleanup(session_id: str) -> str:
 	)
 
 
+def customer_login_arguments(remote, session_id):
+	if "customer_ssh_user" not in remote:
+		return [f"tsuite-ops-{session_id[:8]}@127.0.0.1"]
+	user = remote["customer_ssh_user"]
+	if remote.get("platform") != "windows" or (not isinstance(user, str) or not user or len(user) > 256 or user.strip() != user
+		or re.search(r"""[\x00-\x1f\x7f'`";&<>|(){}$\\*/?\[\]!]""", user)
+		or re.search(r"(^-|\s-)", user)
+		or ("@" in user and (user.count("@") != 1 or not user.split("@")[0]
+			or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", user.split("@")[1])))):
+		raise CliError("Invalid Windows customer SSH user.")
+	return ["-l", user, "127.0.0.1"]
+
+
 def customer_ssh_args(config: dict[str, Any], local: dict[str, Any], remote: dict[str, Any]) -> tuple[list[str], pathlib.Path]:
 	host_key = remote.get("customer_host_key")
 	if not host_key:
@@ -131,7 +144,7 @@ def customer_ssh_args(config: dict[str, Any], local: dict[str, Any], remote: dic
 		"ssh", "-J", config["bastion"], "-i", local["identity_file"],
 		"-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={known_hosts}",
-		"-p", str(port), f"tsuite-ops-{remote['id'][:8]}@127.0.0.1",
+		"-p", str(port), *customer_login_arguments(remote, remote["id"]),
 	]
 	return args, known_hosts
 

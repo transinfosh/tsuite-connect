@@ -12,6 +12,241 @@ function Assert-SessionId([string]$Value) {
     if ($Value -cnotmatch '^[a-f0-9]{12}$') { throw 'Invalid session ID.' }
 }
 
+function Test-SupportSshUser([string]$Value) {
+    if ($Value.Length -eq 0 -or $Value.Length -gt 256 -or $Value -cne $Value.Trim() -or
+        $Value -cmatch '[\x00-\x1f\x7f''`";&<>|(){}$\\*/?\[\]!]' -or $Value -cmatch '(^-|\s-)') { return $false }
+    if ($Value.Contains('@')) {
+        $parts=$Value.Split('@')
+        if ($parts.Count -ne 2 -or -not $parts[0] -or $parts[1] -cnotmatch '^[A-Za-z0-9][A-Za-z0-9.-]*$') { return $false }
+    }
+    return $true
+}
+
+function Test-SupportAccountName([string]$Value) {
+    return ($Value.Length -gt 0 -and $Value.Length -le 256 -and $Value -ceq $Value.Trim() -and
+        $Value -cnotmatch '[\x00-\x1f\x7f"*/?\[\]!@]' -and
+        @($Value.Split('\')).Count -eq 2 -and @($Value.Split('\') | Where-Object { $_.Length -eq 0 }).Count -eq 0)
+}
+
+function Get-SupportUserPrincipalName {
+    if (-not ('TSuiteSupport.AccountNames' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace TSuiteSupport {
+    public static class AccountNames {
+        [DllImport("secur32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+        static extern bool GetUserNameEx(int format,StringBuilder value,ref uint length);
+        public static string Principal() {
+            uint length=0;GetUserNameEx(8,null,ref length);
+            if(length<2 || length>4096)throw new Win32Exception();
+            var value=new StringBuilder((int)length);
+            if(!GetUserNameEx(8,value,ref length))throw new Win32Exception();
+            return value.ToString();
+        }
+    }
+}
+'@
+    }
+    return [TSuiteSupport.AccountNames]::Principal()
+}
+
+function Get-SupportAccountMode($State) {
+    if ($State -is [Collections.IDictionary]) {
+        if (-not $State.Contains('account_mode')) { return 'temporary' }
+        $value = $State['account_mode']
+    } else {
+        $property = $State.PSObject.Properties['account_mode']
+        if (-not $property) { return 'temporary' }
+        $value = $property.Value
+    }
+    if ($value -cnotin @('existing', 'temporary')) { throw 'Invalid support account mode.' }
+    return $value
+}
+
+function Get-SupportWindowsIdentity { return [Security.Principal.WindowsIdentity]::GetCurrent() }
+
+function Get-SupportExecutorAccount {
+    $identity = Get-SupportWindowsIdentity
+    $sid = $identity.User.Value
+    if ($identity.IsSystem -or $sid -cnotmatch '^S-1-5-21-\d+-\d+-\d+-\d+$') {
+        throw 'Run the customer command as a local or Active Directory administrator, not a service or Entra ID identity.'
+    }
+    $local = Get-LocalUser -SID $sid -ErrorAction SilentlyContinue
+    if ($local) {
+        if (-not $local.Enabled) { throw 'The current Windows account is disabled.' }
+        $name = "$env:COMPUTERNAME\$($local.Name)"
+        $sshUser = $local.Name.ToLowerInvariant()
+        $allowUser = $sshUser
+    } else {
+        $name = $identity.Name
+        $allowUser = $name.ToLowerInvariant()
+        # Modern Unix OpenSSH rejects the backslash SAM form; UPN works on both support platforms.
+        $sshUser = (Get-SupportUserPrincipalName).ToLowerInvariant()
+        if ((Resolve-SupportAccountSid $sshUser) -cne $sid) { throw 'Windows UPN does not match the executing account SID.' }
+    }
+    if ($name.Split('\')[-1] -like 'tsuite-ops-*') {
+        throw 'Run the customer command from your normal Windows administrator account; temporary support accounts cannot be reused.'
+    }
+    if (-not (Test-SupportSshUser $sshUser) -or -not (Test-SupportAccountName $name)) { throw 'The current Windows account name is not supported by the SSH session policy.' }
+    return [pscustomobject]@{account_mode='existing'; ops_user=$name; ops_sid=$sid; ssh_user=$sshUser; ssh_allow_user=$allowUser}
+}
+
+function Resolve-SupportAccountSid([string]$Name) {
+    $account = New-Object Security.Principal.NTAccount($Name)
+    return $account.Translate([Security.Principal.SecurityIdentifier]).Value
+}
+
+function Assert-SupportAccountBinding($State) {
+    if ((Resolve-SupportAccountSid $State.ops_user) -cne $State.ops_sid) {
+        throw 'The Windows account no longer matches the original support session SID.'
+    }
+}
+
+function New-SupportSessionProcess([string]$Executable, [string]$Arguments, [string]$ErrorPath) {
+    if (-not ('TSuiteSupport.SessionProcess' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace TSuiteSupport {
+    // One anonymous, non-inheritable Job owns only this listener and its descendants.
+    public sealed class SessionProcess : IDisposable {
+        private IntPtr job;
+        public Process Process { get; private set; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BasicLimits {
+            public long ProcessTime, JobTime;
+            public uint Flags;
+            public UIntPtr MinWorkingSet, MaxWorkingSet;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint Priority, Scheduling;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IoCounters {
+            public ulong ReadOps, WriteOps, OtherOps, ReadBytes, WriteBytes, OtherBytes;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ExtendedLimits {
+            public BasicLimits Basic;
+            public IoCounters Io;
+            public UIntPtr ProcessMemory, JobMemory, PeakProcessMemory, PeakJobMemory;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SecurityAttributes {
+            public uint Length;
+            public IntPtr Descriptor;
+            [MarshalAs(UnmanagedType.Bool)] public bool Inherit;
+        }
+        [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+        private struct StartupInfo {
+            public uint Size;
+            public string Reserved, Desktop, Title;
+            public uint X, Y, Width, Height, XChars, YChars, Fill, Flags;
+            public ushort ShowWindow, ReservedSize;
+            public IntPtr ReservedData, Input, Output, Error;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ProcessInfo {
+            public IntPtr Process, Thread;
+            public uint ProcessId, ThreadId;
+        }
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool SetInformationJobObject(IntPtr job, int kind, ref ExtendedLimits info, uint size);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        private static extern IntPtr CreateFile(string path, uint access, uint share, ref SecurityAttributes attributes,
+                                               uint disposition, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        private static extern bool CreateProcess(string application, StringBuilder command, IntPtr processAttributes,
+                                                IntPtr threadAttributes, bool inheritHandles, uint flags,
+                                                IntPtr environment, string directory, ref StartupInfo startup,
+                                                out ProcessInfo process);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern uint ResumeThread(IntPtr thread);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool TerminateProcess(IntPtr process, uint code);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool TerminateJobObject(IntPtr job, uint code);
+        [DllImport("kernel32.dll")]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        private static void Close(IntPtr handle) {
+            if (handle != IntPtr.Zero && handle != new IntPtr(-1)) CloseHandle(handle);
+        }
+
+        public static SessionProcess Start(string executable, string arguments, string errorPath) {
+            var owner = new SessionProcess();
+            ProcessInfo child = new ProcessInfo();
+            IntPtr input = IntPtr.Zero, error = IntPtr.Zero;
+            bool created = false;
+            try {
+                owner.job = CreateJobObject(IntPtr.Zero, null);
+                if (owner.job == IntPtr.Zero) throw new Win32Exception();
+                var limits = new ExtendedLimits();
+                limits.Basic.Flags = 0x2000; // KILL_ON_JOB_CLOSE; no breakaway.
+                if (!SetInformationJobObject(owner.job, 9, ref limits, (uint)Marshal.SizeOf(limits)))
+                    throw new Win32Exception();
+                var attributes = new SecurityAttributes();
+                attributes.Length = (uint)Marshal.SizeOf(attributes);
+                attributes.Inherit = true;
+                input = CreateFile("NUL", 0xC0000000, 3, ref attributes, 3, 0x80, IntPtr.Zero);
+                if (input == new IntPtr(-1)) throw new Win32Exception();
+                error = CreateFile(errorPath, 4, 3, ref attributes, 4, 0x80, IntPtr.Zero);
+                if (error == new IntPtr(-1)) throw new Win32Exception();
+                var startup = new StartupInfo();
+                startup.Size = (uint)Marshal.SizeOf(startup);
+                startup.Flags = 0x100; // STARTF_USESTDHANDLES.
+                startup.Input = input; startup.Output = input; startup.Error = error;
+                var command = new StringBuilder("\"" + executable + "\" " + arguments);
+                // Assign while suspended: no login or child can escape between creation and assignment.
+                if (!CreateProcess(executable, command, IntPtr.Zero, IntPtr.Zero, true,
+                                   0x08000004, IntPtr.Zero, null, ref startup, out child))
+                    throw new Win32Exception();
+                created = true;
+                if (!AssignProcessToJobObject(owner.job, child.Process)) throw new Win32Exception();
+                owner.Process = System.Diagnostics.Process.GetProcessById((int)child.ProcessId);
+                if (owner.Process.Handle == IntPtr.Zero) throw new Win32Exception();
+                if (ResumeThread(child.Thread) == UInt32.MaxValue) throw new Win32Exception();
+                return owner;
+            } catch {
+                if (created) TerminateProcess(child.Process, 1);
+                owner.Dispose();
+                throw;
+            } finally {
+                Close(child.Thread); Close(child.Process); Close(input); Close(error);
+            }
+        }
+
+        public void Dispose() {
+            if (job != IntPtr.Zero) {
+                TerminateJobObject(job, 1);
+                CloseHandle(job);
+                job = IntPtr.Zero;
+            }
+            if (Process != null) {
+                Process.WaitForExit(5000);
+                Process.Dispose();
+                Process = null;
+            }
+        }
+    }
+}
+'@
+    }
+    return [TSuiteSupport.SessionProcess]::Start($Executable, $Arguments, $ErrorPath)
+}
+
 function Enter-SupportLock([string]$Id, [int]$TimeoutMilliseconds = 0) {
     Assert-SessionId $Id
     $mutex = New-Object Threading.Mutex($false, "Global\TSuiteSupport-$Id")
@@ -265,8 +500,12 @@ function Read-SupportState([string]$Id) {
     $directory = Join-Path (Get-SupportRoot) $Id
     Assert-PrivateDirectory $directory
     $state = Read-Utf8WithRetry (Join-Path $directory 'session.json') | ConvertFrom-Json
-    if ($state.session_id -cne $Id -or $state.ops_user -cne "tsuite-ops-$($Id.Substring(0, 8))") {
-        throw 'Support state does not match this session.'
+    if ($state.session_id -cne $Id) { throw 'Support state does not match this session.' }
+    if ((Get-SupportAccountMode $state) -eq 'temporary') {
+        if ($state.ops_user -cne "tsuite-ops-$($Id.Substring(0, 8))") { throw 'Support account does not match this session.' }
+    } elseif ($state.ops_sid -cnotmatch '^S-1-5-21-\d+-\d+-\d+-\d+$' -or
+        -not (Test-SupportSshUser $state.ssh_user) -or -not (Test-SupportAccountName $state.ops_user)) {
+        throw 'Invalid existing Windows account binding.'
     }
     return $state
 }
@@ -347,7 +586,10 @@ function Remove-SupportSessionResources([string]$Id) {
     $state = Read-SupportState $Id
     $directory = Join-Path (Get-SupportRoot) $Id
     # Disable login before stopping tasks or removing credentials. Never remove a pre-existing account.
-    $user = Get-LocalUser -Name $state.ops_user -ErrorAction SilentlyContinue
+    $user = $null
+    if ((Get-SupportAccountMode $state) -eq 'temporary') {
+        $user = Get-LocalUser -Name $state.ops_user -ErrorAction SilentlyContinue
+    }
     if ($user) {
         if ($user.Description -cne "TSuite temporary support $Id") { throw 'Account ownership mismatch.' }
         Disable-LocalUser -SID $user.SID
@@ -430,6 +672,7 @@ function Invoke-SupportProcess($State, [string]$ActionMode) {
     $directory = Join-Path (Get-SupportRoot) $State.session_id
     while ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -lt [long](Read-SupportState $State.session_id).expires_at -and -not (Test-Path (Join-Path $directory 'closing'))) {
         if ($ActionMode -eq 'Sshd') {
+            if ((Get-SupportAccountMode $State) -eq 'existing') { Assert-SupportAccountBinding $State }
             $executable = $State.sshd_path
             $arguments = '-D -E "{0}" -f "{1}"' -f (Join-Path $directory 'Sshd.native.log'), (Join-Path $directory 'sshd_config')
         } else {
@@ -438,16 +681,25 @@ function Invoke-SupportProcess($State, [string]$ActionMode) {
                 (Join-Path $directory 'tunnel_ed25519'), (Join-Path $directory 'known_hosts'), `
                 $State.bastion_port, $State.remote_port, $State.local_port, $State.tunnel_user, $State.bastion_host
         }
-        $process = Start-Process -FilePath $executable -ArgumentList $arguments -PassThru -NoNewWindow `
-            -RedirectStandardError (Join-Path $directory "$ActionMode.stderr.log")
+        $owned = $null
+        if ($ActionMode -eq 'Sshd' -and (Get-SupportAccountMode $State) -eq 'existing') {
+            $owned = New-SupportSessionProcess $executable $arguments (Join-Path $directory "$ActionMode.stderr.log")
+            $process = $owned.Process
+        } else {
+            $process = Start-Process -FilePath $executable -ArgumentList $arguments -PassThru -NoNewWindow `
+                -RedirectStandardError (Join-Path $directory "$ActionMode.stderr.log")
+        }
         try {
             while (-not $process.WaitForExit(1000)) {
                 if ((Test-Path (Join-Path $directory 'closing')) -or
                     [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge [long](Read-SupportState $State.session_id).expires_at) { break }
             }
         } finally {
-            if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
-            $process.Dispose()
+            if ($owned) { $owned.Dispose() }
+            else {
+                if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+                $process.Dispose()
+            }
         }
         Start-Sleep -Seconds 5
     }
@@ -506,8 +758,11 @@ function Request-SupportLease($State, [bool]$Active) {
 function Set-SupportExpiry($State, [long]$Expiry) {
     $directory = Join-Path (Get-SupportRoot) $State.session_id
     $date = [DateTimeOffset]::FromUnixTimeSeconds($Expiry)
-    $user = Get-LocalUser -Name $State.ops_user
-    if ($user.Description -cne "TSuite temporary support $($State.session_id)") { throw 'Account ownership mismatch.' }
+    $user = $null
+    if ((Get-SupportAccountMode $State) -eq 'temporary') {
+        $user = Get-LocalUser -Name $State.ops_user
+        if ($user.Description -cne "TSuite temporary support $($State.session_id)") { throw 'Account ownership mismatch.' }
+    } else { Assert-SupportAccountBinding $State }
     $path = Join-Path $directory 'authorized_keys'
     $keys = Get-Content -LiteralPath $path -Raw
     # Sessions created before portable access have one key and no mode flag.
@@ -519,7 +774,7 @@ function Set-SupportExpiry($State, [long]$Expiry) {
     # Native restrictions first; commit the watchdog deadline only after both succeed.
     Write-Utf8 $path $keys
     Set-ServiceFilePermissions $path
-    Set-LocalUser -SID $user.SID -AccountExpires $date.LocalDateTime
+    if ($user) { Set-LocalUser -SID $user.SID -AccountExpires $date.LocalDateTime }
     $State.expires_at = $Expiry
     Write-SupportState $State $directory
 }
@@ -533,6 +788,14 @@ function Watch-SupportLease([string]$Id) {
             $directory = Join-Path (Get-SupportRoot) $Id
             if ((Test-Path (Join-Path $directory 'closing')) -or
                 [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge [long]$state.expires_at) { return }
+            if ((Get-SupportAccountMode $state) -eq 'existing') {
+                try { Assert-SupportAccountBinding $state }
+                catch {
+                    Write-Utf8 (Join-Path $directory 'closing') 'Windows account binding changed'
+                    Start-ScheduledTask -TaskName "TSuiteSupport-$Id-Cleanup"
+                    return
+                }
+            }
             $activity = Test-SupportActivity $state $previous
             $expiry = Request-SupportLease $state $activity.active
             if ($expiry -ne $state.expires_at) { Set-SupportExpiry $state $expiry }

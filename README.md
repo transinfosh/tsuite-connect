@@ -29,9 +29,8 @@ SSH 反向隧道。客户只需执行一条由公司 CLI 生成的命令，无�
 - 每个会话使用独立的 enrollment key、隧道 Unix 用户、隧道 key、operator key 和回环端口；
 - 反向端口固定为堡垒机的 `127.0.0.1:<port>`，不会暴露到公网；
 - 客户和堡垒机的 SSH Host Key 均严格固定，禁止首次连接自动信任；
-- Linux 客户端创建临时免密 root 运维用户；Windows 客户端创建临时本地管理员；默认从接入起闲置两小时后自动删除，实际输入会自动续期；
-- 关闭或过期时，堡垒机会终止隧道连接、删除隧道用户和私钥，客户机会删除临时用户、
-  sudoers、密钥、systemd unit 与本地会话配置。
+- Linux 客户端创建临时免密 root 运维用户；新 Windows 会话复用执行受控端命令的现有管理员账户，保留其账户和用户配置。默认闲置两小时后撤销本会话访问，实际输入会自动续期；
+- 关闭或过期时，堡垒机会终止隧道连接、删除隧道用户和私钥，客户机清理本会话密钥、任务与本地会话配置；Linux 和旧 Windows 临时账户按原规则回收，复用的 Windows 账户不变。
 
 这是一条临时的完整 root 运维通道。创建会话前应获得客户授权，并在工单中记录客户、用途、
 创建人和会话 ID。不要把接入链接公开传播，也不要把私钥或 enrollment 响应写入聊天记录或普通日志。
@@ -137,9 +136,9 @@ Edge 的受限 SSH 代理到客户，不经过控制机。公开 `/connect/opera
 每个新会话的控制机 operator key 同时作为该会话专属 SSH CA。客户仍保留原 operator 公钥，
 供控制机完成普通关闭；新增 CA 信任只接受完整会话 ID principal。Edge 的 CA 信任同样限定
 principal，并强制执行该会话的 show/proxy，禁止 Shell、任意端口及转发。证书本身不设固定
-总时长，实际有效期由 Edge/客户 CA 行的原生 `expiry-time` 和客户账号期限限制，跟随现有
+总时长，实际有效期由 Edge/客户 CA 行的原生 `expiry-time` 限制，临时客户账号还受账号期限限制，跟随现有
 闲置租约更新；没有全局 CA 信任。关闭开始时删除 Edge CA 信任，撤销隧道；客户清理删除
-整个临时账号及两条授权记录。状态查询、等待和后台清理轮询均不续期。
+本会话的两条授权记录，临时账号按原规则回收。状态查询、等待和后台清理轮询均不续期。
 
 本机连接程序会显示再次连接命令，例如：
 
@@ -296,7 +295,7 @@ tsuite-connect close SESSION_ID --force --closed-by alice \
 - 输入标记有效期最多 45 秒，同一标记只处理一次；运维端断开后不会依靠残留标记永久续期。
 - 长任务若在最后一次输入之后持续超过闲置窗口，仍会到期，即使它一直输出日志。需要提前为此类任务配置更长的闲置窗口，或在期限内继续实际输入。
 - 关闭、过期与续期共享互斥锁，关闭后不可复活。网络故障时不自行延长，按最后确认的截止时间清理。
-- 堡垒机隧道与续期 key、Linux 运维 key、Windows 账号与 key 随租约同步。客户定时清理读取最新期限，后台任务不再有固定两小时/九小时运行限制。
+- 堡垒机隧道与续期 key、Linux 运维 key、Windows 会话 key 随租约同步，旧 Windows 临时账号期限也同步更新。客户定时清理读取最新期限，后台任务不再有固定两小时/九小时运行限制。
 
 升级需同步安装堡垒机管理器与受限 sudo 配置、Linux/Windows 客户脚本、控制机 broker/页面和公司 CLI，
 新增的 `linux-client.py`、`tsuite_connect_activity.py` 必须随安装器一起交付。已接入的旧会话仍按原固定期限关闭，
@@ -342,19 +341,20 @@ LocalAccounts、ScheduledTasks 模块及出站 HTTPS/堡垒机 SSH 访问。
 
 Windows 会话的行为与边界：
 
-- 临时账号名称沿用 `tsuite-ops-<会话ID前8位>`，使用不保存的随机密码，加入本地 Administrators。
-  客户执行接入命令即授权该会话的临时管理员访问，权限范围与 Linux 临时 root 相当。
+- 从 v0.4.0 起，新 Windows 接入复用实际执行管理员 PowerShell 的账户；若以其他管理员身份运行，则使用提升后的身份。支持本地和 AD 管理员，不读取密码，不修改密码、组、启用状态或账户期限，不创建临时账户。SYSTEM、服务、Entra ID 和 `tsuite-ops-*` 临时身份明确拒绝。
+- 本地登录使用本地用户名；AD 登录使用系统解析并验证 SID 的 UPN，服务器规则使用规范域账户名。登录名必须可由 Linux/Windows OpenSSH 安全传递；不支持的名字在创建会话资源前报错。账户更名或 SID 换绑会关闭本会话。复用账户的操作以该账户记录，需结合独立会话 ID、密钥和工单区分支持会话。
 - 每会话目录为 `%ProgramData%\TSuiteSupport\<完整会话ID>`，仅 SYSTEM 和 Administrators 可访问。
   会话登记私钥只写入临时受限目录，结束引导时删除；登记私钥不进入命令参数，独立续期私钥仅保存在本机受限目录。
-- SYSTEM 计划任务运行独立 `sshd -D`，只监听 `127.0.0.1` 上的临时端口，只允许本会话账号及公钥。
+- SYSTEM 计划任务运行独立 `sshd -D`，只监听 `127.0.0.1` 上的临时端口，只允许绑定的现有账号及本会话独立公钥。
   反向隧道指向该端口。不会修改现有 `sshd_config`、管理员共享公钥文件或默认 Shell；本次自动安装
   OpenSSH 新建的 TCP/22 入站防火墙规则会被立即禁用，既有规则不会被改写。
   会话使用独立 Host Key，并通过原有登记协议固定到运维端。
 - 建立反向隧道前，客户机在 `127.0.0.1` 上分别完成普通公钥和短期证书登录自检。自检密钥立即删除；
   失败时不会建立隧道，并保存 VERBOSE 级别启动诊断，避免把本机认证失败误判为 edge/FRP 故障。
 - Sshd/Tunnel 任务在启动后和机器重启后运行，连接失败每 5 秒重试，过期后不重连。
-  Cleanup 任务从初始期限起每分钟复查最新到期时间，并在重启时补做过期清理。账号与公钥同时设置并更新原生过期时间。
-- 普通关闭先请求 Windows SYSTEM 清理任务，收到确认后再撤销堡垒机。清理会禁用账号、停止任务、
+  Cleanup 任务从初始期限起每分钟复查最新到期时间，并在重启时补做过期清理。新会话只设置本会话公钥的原生期限，不设置现有账户期限。
+- 新会话的独立监听及 SSH 子进程进入 Windows Job。正常关闭、到期或任务被停止时，只终止本会话进程树、移除密钥/任务/目录；原账户、用户配置、桌面、业务程序和同一账户下其他会话保持运行。经 SCM 等方式专门安装的业务服务不属于 SSH 子进程清理范围。
+- 普通关闭先请求 Windows SYSTEM 清理任务，收到确认后再撤销堡垒机。旧版已创建临时账户的会话继续原清理方式：禁用账号、停止任务、
   终止该账号的进程、删除临时用户及配置。进程归属通过原生进程信息检查，不再逐个 PID 调用 WMI。
   确认该账号无进程后，清理其残留用户注册表挂载，再删除精确 SID 对应的用户配置。
   配置清理受文件锁等因素阻碍时，将会话 ID、SID、次数和下次尝试时间原子保存到私有目录的
@@ -364,7 +364,7 @@ Windows 会话的行为与边界：
   私有重试状态同时保留失败原因。若用户注册表仍由系统占用，不强制卸载；挂载释放后
   （例如 Windows 重启完成），下次任务检查会立即重试，无需等待原退避期限。
   强制关闭仍只代表堡垒机撤销；离线客户将在启动后清理。
-- 不覆盖同名账号、会话目录或计划任务。安装失败会尝试回滚；已登记但安装失败的会话需关闭后重新创建。
+- 不覆盖已有会话目录或计划任务，不把旧临时账户会话转成复用模式。安装失败会尝试回滚；已登记但安装失败的会话需关闭后重新创建。
   不同完整会话 ID 的资源独立；不要通过复制旧目录复用会话。
 
 交互 SSH 沿用客户现有默认 Shell；CLI/broker 的 `run` 在 Windows 上通过 PowerShell 编码执行，
@@ -383,6 +383,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\TSuite
 
 ### 升级兼容与验证
 
+v0.4.0 增加可选 `customer_ssh_user`：经客户 enrollment 固定到完整会话，CLI、broker、Linux/Windows 支持端据此选择登录账户。未带字段的旧会话继续原临时用户名。客户私有状态新增 `account_mode=existing` 和 SID；无模式字段按旧 `temporary` 清理，未知模式拒绝。先更新 Edge 管理器和全部支持端/broker，再启用新 Windows bootstrap。已下载到支持机的旧程序不远程覆盖；新会话需领取新客户端。现有 Windows 会话不转换身份，升级无需重启 Windows。
+
+设计和验证边界见[规格契约](docs/windows/Windows账户复用-规格契约.md)、[BDD 场景](docs/windows/Windows账户复用-BDD场景.md)和[测试映射](docs/windows/Windows账户复用-测试映射.md)。
+
 会话协议增加 `platform`（`linux` / `windows`），缺省为 Linux，旧会话无需迁移。原有 JSON 字段、
 回环端口和 Linux 命令保持兼容。需一起更新堡垒机管理器/bridge、控制机 broker/页面及使用中的公司 CLI；
 堡垒机安装器会将 `bootstrap.ps1` 和 `windows-client.ps1` 安装到 Linux bootstrap 的同目录。
@@ -394,10 +398,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\TSuite
 python3 -m unittest discover -s tests -p 'test_*.py'
 pwsh -NoProfile -File tests/test_windows_client.ps1
 pwsh -NoProfile -File tests/test_windows_cleanup.ps1
+pwsh -NoProfile -File tests/test_windows_identity.ps1
 pwsh -NoProfile -File tests/test_windows_lease.ps1
 ```
 
-PowerShell 测试使用隔离替身验证任务和清理行为，不创建真实账号或服务。正式使用前还需在可丢弃的
+生命周期单元测试使用隔离替身验证任务和清理行为，不创建真实账号或服务。Windows CI 的 `test_windows_existing_auth.ps1` 在可丢弃 runner 上复用现有管理员，用两套 OpenSSH 验证公钥/证书登录、续期、两个会话隔离、异常停止和账户属性保留；测试任务与进程均在 finally 回收。域身份只覆盖替身，真实 AD 接入仍需现场验证。正式使用前还需在可丢弃的
 Windows Server 2016、2019、2022、2025 和 Windows 10/11 上分别验证真实会话：领取、SSH 公钥与证书登录、
 带空格/中文参数执行、网络恢复、普通关闭、
 离线跨过期后重启清理，以及已有 SAP1 登录仍正常。Linux 上的语法/单元测试不能代替 Windows 系统集成验证。
@@ -411,7 +416,7 @@ Windows API 依据：[计划任务](https://learn.microsoft.com/en-us/powershell
 临时监听未启动时，接入脚本会在回滚前输出计划任务状态及原始启动错误，并把诊断保存在
 `%ProgramData%\TSuiteSupport\diagnostics\<会话ID>-startup.log`。诊断目录仅允许 SYSTEM 和
 Administrators 访问；只收集任务状态及 SSH/任务启动错误，不复制会话配置、会话码或私钥。
-临时账号、密钥和任务仍正常回滚，诊断文件保留供管理员排查，排查完成后可删除。
+本会话密钥和任务正常回滚，现有账户与用户配置保留；旧临时账号继续原回滚，诊断文件保留供管理员排查，排查完成后可删除。
 
 ```powershell
 Get-Content "$env:ProgramData\TSuiteSupport\diagnostics\*-startup.log"

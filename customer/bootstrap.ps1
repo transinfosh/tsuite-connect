@@ -10,7 +10,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     -not [Environment]::Is64BitProcess -or $PSVersionTable.PSEdition -ne 'Desktop') {
     throw 'Run in elevated 64-bit Windows PowerShell 5.1 (powershell.exe).'
 }
-foreach ($command in @('New-LocalUser', 'Register-ScheduledTask', 'Get-CimInstance')) {
+foreach ($command in @('Get-LocalUser', 'Register-ScheduledTask', 'Get-CimInstance')) {
     Get-Command $command -ErrorAction Stop | Out-Null
 }
 
@@ -30,7 +30,7 @@ function Assert-SupportedWindowsHost {
         throw 'TSuite support does not run on Windows domain controllers.'
     }
     if ($computerSystem.DomainRole -in @(4, 5)) {
-        throw 'TSuite support does not create temporary local administrators on a domain controller.'
+        throw 'TSuite support does not run on Windows domain controllers.'
     }
     return @{
         operating_system = $operatingSystem
@@ -38,6 +38,8 @@ function Assert-SupportedWindowsHost {
     }
 }
 
+$account = Get-SupportExecutorAccount
+Write-Host ("Support access will use Windows account {0}; closing this session keeps the account and its user profile." -f $account.ops_user)
 $windowsHost = Assert-SupportedWindowsHost
 Assert-SessionId $configuration.session_id
 if ($configuration.bastion_host -cnotmatch '^[a-zA-Z0-9.-]+$' -or
@@ -240,7 +242,7 @@ function Test-LocalSshAuthentication(
         foreach ($identity in @($plainKey, $certificateKey)) {
             $output = & $SshPath -F none -T -i $identity -o IdentitiesOnly=yes -o BatchMode=yes `
                 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$knownHostsPath" `
-                -o ClearAllForwardings=yes -o ConnectTimeout=10 -p $Port "$User@127.0.0.1" `
+                -o ClearAllForwardings=yes -o ConnectTimeout=10 -p $Port -l $User '127.0.0.1' `
                 'cmd.exe /d /c exit 0' 2>&1
             if ($LASTEXITCODE -ne 0) {
                 throw "Local OpenSSH public-key/certificate authentication self-test failed: $($output -join ' ')"
@@ -282,23 +284,51 @@ $sshPath = $openSsh.ssh
 $keygenPath = $openSsh.keygen
 $sftpPath = $openSsh.sftp
 
-function Invoke-Enrollment([string]$Action, $Request) {
+function Invoke-Enrollment([ValidateSet('enroll')][string]$Action, $Request) {
     $json = $Request | ConvertTo-Json -Compress
-    $result = $json | & $sshPath -F none -T -i (Join-Path $temporary 'enrollment_key') `
-        -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes `
-        -o "UserKnownHostsFile=$temporary\known_hosts" -o ClearAllForwardings=yes `
-        -o ConnectTimeout=15 -p $configuration.bastion_port "tsuite-enroll@$($configuration.bastion_host)" $Action
-    if ($LASTEXITCODE -ne 0) { throw 'Session enrollment failed; create a new session if its code was consumed.' }
-    return ($result -join "`n" | ConvertFrom-Json)
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.FileName = $sshPath
+    $start.Arguments = '-F none -T -i "{0}" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="{1}" -o ClearAllForwardings=yes -o ConnectTimeout=15 -p {2} tsuite-enroll@{3} {4}' -f `
+        (Join-Path $temporary 'enrollment_key'), (Join-Path $temporary 'known_hosts'), $configuration.bastion_port, $configuration.bastion_host, $Action
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = New-Object Diagnostics.Process
+    $process.StartInfo = $start
+    $started = $false
+    try {
+        # Framework 4.x emits Console.InputEncoding's preamble when it creates native stdin.
+        $previousInputEncoding = [Console]::InputEncoding
+        try {
+            if ($previousInputEncoding.GetPreamble().Length -gt 0) { [Console]::InputEncoding = New-Object Text.UTF8Encoding($false) }
+            $started = $process.Start()
+        } finally { [Console]::InputEncoding = $previousInputEncoding }
+        $output = $process.StandardOutput.ReadToEndAsync()
+        $errors = $process.StandardError.ReadToEndAsync()
+        # Write exact UTF-8 bytes; Windows PowerShell's native pipeline can replace Unicode with '?'.
+        $bytes = (New-Object Text.UTF8Encoding($false)).GetBytes($json + "`n")
+        $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+        $process.StandardInput.Close()
+        if (-not $process.WaitForExit(30000)) { throw 'Session enrollment timed out.' }
+        if ($process.ExitCode -ne 0) { throw 'Session enrollment failed; create a new session if its code was consumed.' }
+        return ($output.Result | ConvertFrom-Json)
+    } finally {
+        if ($started -and -not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+        $process.Dispose()
+    }
 }
 
 $root = Get-SupportRoot
 $id = $configuration.session_id
 $directory = Join-Path $root $id
-$opsUser = "tsuite-ops-$($id.Substring(0, 8))"
+$opsUser = $account.ops_user
+$sshUser = $account.ssh_user
+$allowUser = $account.ssh_allow_user
 $mutex = Enter-SupportLock $id
 try {
-    if ((Test-Path -LiteralPath $directory) -or (Get-LocalUser -Name $opsUser -ErrorAction SilentlyContinue)) {
+    if (Test-Path -LiteralPath $directory) {
         throw 'This session already has local resources. Close/clean it before retrying; nothing was overwritten.'
     }
     foreach ($mode in @('Sshd', 'Tunnel', 'Monitor', 'Cleanup')) {
@@ -326,6 +356,7 @@ try {
         # Possession of this session's forced-command enrollment key authenticates enrollment.
         $payload = Invoke-Enrollment 'enroll' @{
             nonce = [guid]::NewGuid().ToString('N'); customer_host_key = $hostKey
+            customer_ssh_user = $sshUser
         }
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
         if ($payload.schema_version -ne 2 -or $payload.platform -cne 'windows' -or $payload.session_id -cne $id -or
@@ -335,6 +366,7 @@ try {
             $payload.remote_port -lt 1024 -or $payload.remote_port -gt 65535 -or
             $payload.expires_at -le $now -or $payload.expires_at -gt ($now + 28800) -or
             $payload.operator_public_key -cnotmatch '^(ssh-ed25519|ecdsa-sha2-nistp256) [A-Za-z0-9+/=]+$' -or
+            $payload.customer_ssh_user -cne $sshUser -or
             $payload.idle_timeout_seconds -lt 300 -or $payload.idle_timeout_seconds -gt 28800 -or
             -not $payload.lease_private_key.StartsWith("-----BEGIN OPENSSH PRIVATE KEY-----`n") -or
             -not $payload.tunnel_private_key.StartsWith("-----BEGIN OPENSSH PRIVATE KEY-----`n")) {
@@ -349,6 +381,7 @@ try {
         $listener.Stop()
         $state = @{
             session_id = $id; ops_user = $opsUser; expires_at = $payload.expires_at
+            account_mode = 'existing'; ops_sid = $account.ops_sid; ssh_user = $sshUser
             portable_operator = ($payload.portable_operator -eq $true)
             idle_timeout_seconds = $payload.idle_timeout_seconds
             bastion_host = $payload.bastion_host; bastion_port = $payload.bastion_port
@@ -381,7 +414,7 @@ try {
     Port $localPort
     HostKey "$sshDirectoryPath/ssh_host_ed25519_key"
     AuthorizedKeysFile "$sshDirectoryPath/authorized_keys"
-    AllowUsers $opsUser
+    AllowUsers "$allowUser"
     AuthenticationMethods publickey
     PubkeyAuthentication yes
     PasswordAuthentication no
@@ -397,17 +430,8 @@ try {
         }
         & $sshdPath -t -f (Join-Path $directory 'sshd_config')
         if ($LASTEXITCODE -ne 0) { throw 'Session sshd configuration validation failed.' }
-        # Install expiry cleanup before granting privileges; account and key also expire natively.
+        # Each session expires through its own keys/watchdogs; the existing account is unchanged.
         Register-SupportTask $id 'Cleanup' $expiry.LocalDateTime
-        $random = New-Object byte[] 48
-        $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-        $rng.GetBytes($random)
-        $rng.Dispose()
-        $password = ConvertTo-SecureString ('Aa1!' + [Convert]::ToBase64String($random)) -AsPlainText -Force
-        $user = New-LocalUser -Name $opsUser -Password $password -AccountExpires $expiry.LocalDateTime `
-            -UserMayNotChangePassword -Description "TSuite temporary support $id"
-        $password.Dispose()
-        Add-LocalGroupMember -SID 'S-1-5-32-544' -Member $user
         Register-SupportTask $id 'Sshd' $expiry.LocalDateTime
         Register-SupportTask $id 'Tunnel' $expiry.LocalDateTime
         Register-SupportTask $id 'Monitor' $expiry.LocalDateTime
@@ -426,7 +450,7 @@ try {
         }
         if ([bool]$windowsHost.use_compatibility_openssh) { Start-Sleep -Seconds 2 }
         try {
-            Test-LocalSshAuthentication $sshPath $keygenPath $directory $opsUser $localPort $id
+            Test-LocalSshAuthentication $sshPath $keygenPath $directory $sshUser $localPort $id
         } catch {
             $authenticationError = $_
             try { Stop-SessionSshdForDiagnostics $id $sshdPath (Join-Path $directory 'sshd_config') }
@@ -439,7 +463,7 @@ try {
         Start-ScheduledTask -TaskName "TSuiteSupport-$id-Monitor"
         if ([DateTimeOffset]::UtcNow -ge $expiry) { throw 'Session expired during installation.' }
         $installed = $true
-        Write-Host "Support session $id started; idle expiry $($expiry.LocalDateTime), extended during activity. Check the support page for connectivity."
+        Write-Host "Support session $id started as $opsUser; idle expiry $($expiry.LocalDateTime), extended during activity. Check the support page for connectivity."
     } finally {
         $configuration = $null
         $payload = $null

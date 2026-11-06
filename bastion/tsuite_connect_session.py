@@ -96,6 +96,16 @@ def validate_purpose(value: str, *, allow_empty: bool = False) -> str:
 	return value
 
 
+def validate_customer_ssh_user(user: str, platform: str) -> str:
+	if platform != "windows" or (not isinstance(user, str) or not user or len(user) > 256 or user.strip() != user
+		or re.search(r"""[\x00-\x1f\x7f'`";&<>|(){}$\\*/?\[\]!]""", user)
+		or re.search(r"(^-|\s-)", user)
+		or ("@" in user and (user.count("@") != 1 or not user.split("@")[0]
+			or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", user.split("@")[1])))):
+		raise SupportError("Invalid Windows customer SSH user.")
+	return user
+
+
 def chown_to_user(path: pathlib.Path, username: str) -> None:
 	account = pwd.getpwnam(username)
 	os.chown(path, account.pw_uid, account.pw_gid)
@@ -481,6 +491,7 @@ def enrollment_payload(session: dict[str, Any], settings: Settings) -> dict[str,
 		"tunnel_private_key": session["tunnel_private_key"],
 		"operator_public_key": session["operator_public_key"],
 		"portable_operator": session.get("portable_operator", False),
+		**({"customer_ssh_user": session["customer_ssh_user"]} if "customer_ssh_user" in session else {}),
 	}
 
 
@@ -580,7 +591,10 @@ def confirm_session_replacement(
 	return existing_session_id
 
 
-def enroll(store: SessionStore, token: str, nonce: str, customer_host_key: str, session_id: str | None = None, *, key_authenticated: bool = False) -> dict[str, Any]:
+def enroll(
+	store: SessionStore, token: str, nonce: str, customer_host_key: str, session_id: str | None = None,
+	*, key_authenticated: bool = False, customer_ssh_user: str | None = None,
+) -> dict[str, Any]:
 	if not NONCE_RE.fullmatch(nonce):
 		raise SupportError("enrollment nonce 无效")
 	customer_host_key = key_without_comment(customer_host_key)
@@ -595,7 +609,11 @@ def enroll(store: SessionStore, token: str, nonce: str, customer_host_key: str, 
 			raise SupportError("支持会话已过期")
 		if session.get("platform") == "pending":
 			raise SupportError("请先由支持人员选择客户机操作系统")
+		if customer_ssh_user is not None:
+			customer_ssh_user = validate_customer_ssh_user(customer_ssh_user, session.get("platform", "linux"))
 		if session["status"] == "issued":
+			if customer_ssh_user is not None:
+				session["customer_ssh_user"] = customer_ssh_user
 			if session.get("idle_timeout_seconds"):
 				session["expires_at"] = now + session["idle_timeout_seconds"]
 				session["last_activity_at"] = now
@@ -611,6 +629,8 @@ def enroll(store: SessionStore, token: str, nonce: str, customer_host_key: str, 
 		elif session["status"] == "enrolled" and secrets.compare_digest(session.get("enroll_nonce", ""), nonce):
 			if not secrets.compare_digest(session["customer_host_key"], customer_host_key):
 				raise SupportError("同一 enrollment nonce 的客户 Host Key 不一致")
+			if session.get("customer_ssh_user") != customer_ssh_user:
+				raise SupportError("Windows account binding does not match this enrollment.")
 		else:
 			raise SupportError("会话码已经被使用")
 		if session.get("idle_timeout_seconds"):
@@ -701,11 +721,13 @@ def enroll_ssh(store: SessionStore, session_id: str) -> None:
 			payload = {"replace_existing_session": existing_session_id}
 		else:
 			payload = enroll(
-				store, body.get("token", ""), body["nonce"], body["customer_host_key"], session_id, key_authenticated=True
+				store, body.get("token", ""), body["nonce"], body["customer_host_key"], session_id,
+				key_authenticated=True, customer_ssh_user=body.get("customer_ssh_user"),
 			)
 	except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
 		raise SupportError("enrollment 请求格式无效") from error
-	print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+	# Keep native Windows PowerShell stdout decoding independent of its console code page.
+	print(json.dumps(payload, ensure_ascii=True, separators=(",", ":")))
 
 
 def customer_script(settings: Settings, session: dict[str, Any]) -> str:

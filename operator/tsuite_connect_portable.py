@@ -193,6 +193,19 @@ def wait_for_customer(root, settings):
         time.sleep(3)
 
 
+def customer_login_arguments(remote, session_id):
+    if "customer_ssh_user" not in remote:
+        return [f"tsuite-ops-{session_id[:8]}@127.0.0.1"]
+    user = remote["customer_ssh_user"]
+    if remote.get("platform") != "windows" or (not isinstance(user, str) or not user or len(user) > 256 or user.strip() != user
+        or re.search(r"""[\x00-\x1f\x7f'`";&<>|(){}$\\*/?\[\]!]""", user)
+        or re.search(r"(^-|\s-)", user)
+        or ("@" in user and (user.count("@") != 1 or not user.split("@")[0]
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", user.split("@")[1])))):
+        raise ValueError("Invalid Windows customer SSH user.")
+    return ["-l", user, "127.0.0.1"]
+
+
 def connect(root, settings, remote, command):
     port = remote["remote_port"]
     host_line = f"[127.0.0.1]:{port} {remote['customer_host_key']}\n"
@@ -231,7 +244,7 @@ def connect(root, settings, remote, command):
         f"ProxyCommand={proxy}",
         "-p",
         str(port),
-        f"tsuite-ops-{settings['id'][:8]}@127.0.0.1",
+        *customer_login_arguments(remote, settings["id"]),
     ]
     base = list(arguments)
     if command:
