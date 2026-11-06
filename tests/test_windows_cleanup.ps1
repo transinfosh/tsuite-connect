@@ -17,6 +17,11 @@ $script:profileLocked = $false
 $script:profileCalls = 0
 $script:ownedRunning = $true
 $script:stopFails = $false
+$script:mounted = $true
+function Test-Path { param($LiteralPath, $ErrorAction)
+    if ($LiteralPath -like 'Registry::*') { return $script:mounted }
+    return Microsoft.PowerShell.Management\Test-Path -LiteralPath $LiteralPath
+}
 function Get-SupportRoot { return $testRoot }
 function Read-SupportState { param($Id) return $script:state }
 function Get-LocalUser { param($Name, $ErrorAction)
@@ -74,6 +79,7 @@ try {
     $retryPath = Join-Path $directory 'cleanup-retry.json'
     $retry = Get-Content -LiteralPath $retryPath -Raw | ConvertFrom-Json
     Assert-True ($retry.attempts -eq 1) 'Persist the first profile failure.'
+    Assert-True ($retry.loaded_hive -and $retry.last_error) 'Retain safe diagnostics for a locked profile.'
     Assert-True ($retry.next_attempt_at -ge [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+290) 'Back off for five minutes after a sharing violation.'
     Assert-True (-not $script:events.Contains('remove-user')) 'Keep the disabled account while its profile remains.'
     Assert-True (-not $script:events.Contains('remove-session-files')) 'Preserve recovery state after a profile failure.'
@@ -105,9 +111,11 @@ try {
     Assert-True ($refused -and $script:profileCalls -eq $calls) 'Reject retry state belonging to another session.'
 
     $retry.session_id = $id
+    $retry.next_attempt_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+3600
     Write-Utf8 $retryPath ($retry | ConvertTo-Json -Compress)
-    $script:profileLocked = $false; $script:events.Clear()
+    $script:profileLocked = $false; $script:mounted = $false; $script:events.Clear()
     Remove-SupportSession $id
+    Assert-True ($script:profileCalls -gt $calls) 'A released hive after reboot must bypass the old backoff deadline.'
     Assert-True $script:events.Contains('remove-user') 'A later successful retry must finish account removal.'
     Assert-True ($script:events[$script:events.Count-1] -eq 'remove-cleanup-task') 'A successful retry must remove its task last.'
 

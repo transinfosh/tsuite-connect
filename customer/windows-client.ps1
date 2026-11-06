@@ -312,7 +312,11 @@ function Remove-SupportProfileWithRetry([string]$Id, [string]$Sid, [string]$Dire
             throw 'Cleanup retry state does not match this session.'
         }
         $attempts = [math]::Min(20, [long]$retry.attempts)
-        if ($now -lt [long]$retry.next_attempt_at) { return $false }
+        $mounted = $retry.PSObject.Properties.Name -contains 'loaded_hive' -and $retry.loaded_hive
+        if ($now -lt [long]$retry.next_attempt_at -and
+            (-not $mounted -or (Test-Path -LiteralPath "Registry::HKEY_USERS\$Sid" -ErrorAction SilentlyContinue))) {
+            return $false
+        }
     }
     try {
         Remove-SupportUserProfile $Sid
@@ -321,7 +325,11 @@ function Remove-SupportProfileWithRetry([string]$Id, [string]$Sid, [string]$Dire
         # Transport/login revocation has already completed. Preserve ownership and retry cheaply.
         $attempts++
         $delay = [long][math]::Min(3600, 300 * [math]::Pow(2, $attempts - 1))
-        $retry = @{session_id=$Id; sid=$Sid; attempts=$attempts; next_attempt_at=$now+$delay}
+        $retry = @{
+            session_id=$Id; sid=$Sid; attempts=$attempts; next_attempt_at=$now+$delay
+            loaded_hive=[bool](Test-Path -LiteralPath "Registry::HKEY_USERS\$Sid" -ErrorAction SilentlyContinue)
+            last_error=$_.Exception.Message
+        }
         $temporary = Join-Path $Directory ('retry-' + [guid]::NewGuid().ToString('N'))
         try {
             Write-Utf8 $temporary ($retry | ConvertTo-Json -Compress)
