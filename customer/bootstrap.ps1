@@ -287,14 +287,20 @@ $sftpPath = $openSsh.sftp
 function Invoke-Enrollment([string]$Action, $Request) {
     $json = $Request | ConvertTo-Json -Compress
     $previousEncoding = $OutputEncoding
+    $previousInputEncoding = [Console]::InputEncoding
     try {
         # Windows PowerShell's default native stdin encoding loses non-ASCII account names.
         $OutputEncoding = New-Object Text.UTF8Encoding($false)
+        # Framework 4.x initializes native stdin with Console.InputEncoding and may emit its BOM.
+        if ($previousInputEncoding.GetPreamble().Length -gt 0) { [Console]::InputEncoding = New-Object Text.UTF8Encoding($false) }
         $result = $json | & $sshPath -F none -T -i (Join-Path $temporary 'enrollment_key') `
             -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes `
             -o "UserKnownHostsFile=$temporary\known_hosts" -o ClearAllForwardings=yes `
             -o ConnectTimeout=15 -p $configuration.bastion_port "tsuite-enroll@$($configuration.bastion_host)" $Action
-    } finally { $OutputEncoding = $previousEncoding }
+    } finally {
+        [Console]::InputEncoding = $previousInputEncoding
+        $OutputEncoding = $previousEncoding
+    }
     if ($LASTEXITCODE -ne 0) { throw 'Session enrollment failed; create a new session if its code was consumed.' }
     return ($result -join "`n" | ConvertFrom-Json)
 }

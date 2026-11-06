@@ -120,8 +120,10 @@ public static class EnrollmentFixture {
         $temporary=$root
         $configuration=[pscustomobject]@{bastion_host='fixture.invalid';bastion_port=22}
         $previousTestInput=$env:TSUITE_IDENTITY_TEST_INPUT
+        $originalInputEncoding=[Console]::InputEncoding
         try {
             $env:TSUITE_IDENTITY_TEST_INPUT=Join-Path $root 'enrollment-input.json'
+            [Console]::InputEncoding=New-Object Text.UTF8Encoding($true)
             $beforeEncoding=$OutputEncoding
             $expected=[string]([char]0x64cd)+[char]0x4f5c+[char]0x5458
             Invoke-Enrollment 'enroll' @{customer_ssh_user=$expected}|Out-Null
@@ -130,7 +132,11 @@ public static class EnrollmentFixture {
             $request=[Text.Encoding]::UTF8.GetString($bytes)|ConvertFrom-Json
             Assert-True ($request.customer_ssh_user -ceq $expected) 'Native enrollment stdin lost the Unicode identity.'
             Assert-True ($OutputEncoding -eq $beforeEncoding) 'Enrollment must preserve the caller encoding.'
-        } finally { $env:TSUITE_IDENTITY_TEST_INPUT=$previousTestInput }
+            Assert-True ([Console]::InputEncoding.GetPreamble().Length -eq 3) 'Enrollment must preserve the host input encoding.'
+        } finally {
+            [Console]::InputEncoding=$originalInputEncoding
+            $env:TSUITE_IDENTITY_TEST_INPUT=$previousTestInput
+        }
     }
     Write-Output 'Windows existing-account identity, renewal, cleanup and cross-session regressions passed.'
 } finally {
