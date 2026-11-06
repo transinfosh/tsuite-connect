@@ -284,25 +284,40 @@ $sshPath = $openSsh.ssh
 $keygenPath = $openSsh.keygen
 $sftpPath = $openSsh.sftp
 
-function Invoke-Enrollment([string]$Action, $Request) {
+function Invoke-Enrollment([ValidateSet('enroll')][string]$Action, $Request) {
     $json = $Request | ConvertTo-Json -Compress
-    $previousEncoding = $OutputEncoding
-    $previousInputEncoding = [Console]::InputEncoding
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.FileName = $sshPath
+    $start.Arguments = '-F none -T -i "{0}" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="{1}" -o ClearAllForwardings=yes -o ConnectTimeout=15 -p {2} tsuite-enroll@{3} {4}' -f `
+        (Join-Path $temporary 'enrollment_key'), (Join-Path $temporary 'known_hosts'), $configuration.bastion_port, $configuration.bastion_host, $Action
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = New-Object Diagnostics.Process
+    $process.StartInfo = $start
+    $started = $false
     try {
-        # Windows PowerShell's default native stdin encoding loses non-ASCII account names.
-        $OutputEncoding = New-Object Text.UTF8Encoding($false)
-        # Framework 4.x initializes native stdin with Console.InputEncoding and may emit its BOM.
-        if ($previousInputEncoding.GetPreamble().Length -gt 0) { [Console]::InputEncoding = New-Object Text.UTF8Encoding($false) }
-        $result = $json | & $sshPath -F none -T -i (Join-Path $temporary 'enrollment_key') `
-            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes `
-            -o "UserKnownHostsFile=$temporary\known_hosts" -o ClearAllForwardings=yes `
-            -o ConnectTimeout=15 -p $configuration.bastion_port "tsuite-enroll@$($configuration.bastion_host)" $Action
+        # Framework 4.x emits Console.InputEncoding's preamble when it creates native stdin.
+        $previousInputEncoding = [Console]::InputEncoding
+        try {
+            if ($previousInputEncoding.GetPreamble().Length -gt 0) { [Console]::InputEncoding = New-Object Text.UTF8Encoding($false) }
+            $started = $process.Start()
+        } finally { [Console]::InputEncoding = $previousInputEncoding }
+        $output = $process.StandardOutput.ReadToEndAsync()
+        $errors = $process.StandardError.ReadToEndAsync()
+        # Write exact UTF-8 bytes; Windows PowerShell's native pipeline can replace Unicode with '?'.
+        $bytes = (New-Object Text.UTF8Encoding($false)).GetBytes($json + "`n")
+        $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+        $process.StandardInput.Close()
+        if (-not $process.WaitForExit(30000)) { throw 'Session enrollment timed out.' }
+        if ($process.ExitCode -ne 0) { throw 'Session enrollment failed; create a new session if its code was consumed.' }
+        return ($output.Result | ConvertFrom-Json)
     } finally {
-        [Console]::InputEncoding = $previousInputEncoding
-        $OutputEncoding = $previousEncoding
+        if ($started -and -not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+        $process.Dispose()
     }
-    if ($LASTEXITCODE -ne 0) { throw 'Session enrollment failed; create a new session if its code was consumed.' }
-    return ($result -join "`n" | ConvertFrom-Json)
 }
 
 $root = Get-SupportRoot
