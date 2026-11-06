@@ -40,6 +40,7 @@ jobs:
         shell: powershell
         run: |
           ./tests/test_windows_client.ps1
+          ./tests/test_windows_cleanup.ps1
           ./tests/test_windows_lease.ps1
           ./tests/test_windows_diagnostics.ps1
           ./tests/test_windows_permissions.ps1

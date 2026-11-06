@@ -355,7 +355,15 @@ Windows 会话的行为与边界：
 - Sshd/Tunnel 任务在启动后和机器重启后运行，连接失败每 5 秒重试，过期后不重连。
   Cleanup 任务从初始期限起每分钟复查最新到期时间，并在重启时补做过期清理。账号与公钥同时设置并更新原生过期时间。
 - 普通关闭先请求 Windows SYSTEM 清理任务，收到确认后再撤销堡垒机。清理会禁用账号、停止任务、
-  终止该账号的进程、删除临时用户及配置。强制关闭仍只代表堡垒机撤销；离线客户将在启动后清理。
+  终止该账号的进程、删除临时用户及配置。进程归属通过原生进程信息检查，不再逐个 PID 调用 WMI。
+  确认该账号无进程后，清理其残留用户注册表挂载，再删除精确 SID 对应的用户配置。
+  配置清理受文件锁等因素阻碍时，将会话 ID、SID、次数和下次尝试时间原子保存到私有目录的
+  `cleanup-retry.json`，按 5、10、20、40、60 分钟退避，之后最多每小时重试一次。
+  每分钟任务仍检查登录撤销和停止会话通道；退避不延长租约、不恢复账号或 SSH 信任。
+  账号、会话目录和 Cleanup 任务在用户配置删除成功后回收，失败时保留禁用账号及恢复状态。
+  私有重试状态同时保留失败原因。若用户注册表仍由系统占用，不强制卸载；挂载释放后
+  （例如 Windows 重启完成），下次任务检查会立即重试，无需等待原退避期限。
+  强制关闭仍只代表堡垒机撤销；离线客户将在启动后清理。
 - 不覆盖同名账号、会话目录或计划任务。安装失败会尝试回滚；已登记但安装失败的会话需关闭后重新创建。
   不同完整会话 ID 的资源独立；不要通过复制旧目录复用会话。
 
@@ -385,6 +393,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\TSuite
 ```bash
 python3 -m unittest discover -s tests -p 'test_*.py'
 pwsh -NoProfile -File tests/test_windows_client.ps1
+pwsh -NoProfile -File tests/test_windows_cleanup.ps1
 pwsh -NoProfile -File tests/test_windows_lease.ps1
 ```
 
