@@ -277,6 +277,64 @@ function Remove-SupportSession([string]$Id) {
     finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
 }
 
+function Get-SupportUserProcesses([string]$UserName) {
+    # Get-Process reads native process tokens once; WMI GetOwnerSid per PID is very expensive.
+    $owner = "$env:COMPUTERNAME\$UserName"
+    Get-Process -IncludeUserName -ErrorAction SilentlyContinue |
+        Where-Object { $_.UserName -ieq $owner }
+}
+
+function Dismount-SupportUserHive([string]$Hive) {
+    & "$env:SystemRoot\System32\reg.exe" unload "HKU\$Hive" 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not unload the support account profile; cleanup will retry.' }
+}
+
+function Remove-SupportUserProfile([string]$Sid) {
+    if ($Sid -cnotmatch '^S-1-5-21-\d+-\d+-\d+-\d+$') { throw 'Invalid local support account SID.' }
+    # OpenSSH can leave a profile mounted after all of this account's processes have exited.
+    # Only the already-revoked, ownership-checked account's hives may be unloaded.
+    foreach ($hive in @("${Sid}_Classes", $Sid)) {
+        if (Test-Path -LiteralPath ("Registry::HKEY_USERS\$hive")) {
+            Dismount-SupportUserHive $hive
+        }
+    }
+    Get-CimInstance Win32_UserProfile -Filter "SID='$Sid'" | Remove-CimInstance
+}
+
+function Remove-SupportProfileWithRetry([string]$Id, [string]$Sid, [string]$Directory) {
+    $path = Join-Path $Directory 'cleanup-retry.json'
+    $attempts = 0
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    if (Test-Path -LiteralPath $path) {
+        $retry = Read-Utf8WithRetry $path | ConvertFrom-Json
+        if ($retry.session_id -cne $Id -or $retry.sid -cne $Sid -or
+            [long]$retry.attempts -lt 1 -or [long]$retry.next_attempt_at -lt 0) {
+            throw 'Cleanup retry state does not match this session.'
+        }
+        $attempts = [math]::Min(20, [long]$retry.attempts)
+        if ($now -lt [long]$retry.next_attempt_at) { return $false }
+    }
+    try {
+        Remove-SupportUserProfile $Sid
+        return $true
+    } catch {
+        # Transport/login revocation has already completed. Preserve ownership and retry cheaply.
+        $attempts++
+        $delay = [long][math]::Min(3600, 300 * [math]::Pow(2, $attempts - 1))
+        $retry = @{session_id=$Id; sid=$Sid; attempts=$attempts; next_attempt_at=$now+$delay}
+        $temporary = Join-Path $Directory ('retry-' + [guid]::NewGuid().ToString('N'))
+        try {
+            Write-Utf8 $temporary ($retry | ConvertTo-Json -Compress)
+            if (Test-Path -LiteralPath $path) { [IO.File]::Replace($temporary, $path, [NullString]::Value) }
+            else { [IO.File]::Move($temporary, $path) }
+        } finally {
+            if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+        }
+        Write-Warning "Support profile cleanup failed; retrying in $delay seconds."
+        return $false
+    }
+}
+
 function Remove-SupportSessionResources([string]$Id) {
     $state = Read-SupportState $Id
     $directory = Join-Path (Get-SupportRoot) $Id
@@ -294,7 +352,7 @@ function Remove-SupportSessionResources([string]$Id) {
         }
     }
     # Task Scheduler may leave native child processes behind after terminating the wrapper.
-    foreach ($process in Get-CimInstance Win32_Process) {
+    foreach ($process in Get-CimInstance Win32_Process -Filter "Name='ssh.exe' OR Name='sshd.exe'") {
         if ($process.Name -notin @('ssh.exe', 'sshd.exe') -or -not $process.CommandLine) { continue }
         $configArgument = '"' + (Join-Path $directory 'sshd_config') + '"'
         $keyArgument = '"' + (Join-Path $directory 'tunnel_ed25519') + '"'
@@ -308,13 +366,13 @@ function Remove-SupportSessionResources([string]$Id) {
     }
     # Stop SSH session shells as well as the task processes; account expiry alone does not end sessions.
     if ($user) {
-        foreach ($process in Get-CimInstance Win32_Process) {
-            $owner = Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid -ErrorAction SilentlyContinue
-            if ($owner -and $owner.Sid -eq $user.SID.Value) {
-                Invoke-CimMethod -InputObject $process -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null
-            }
+        foreach ($process in Get-SupportUserProcesses $state.ops_user) {
+            Stop-Process -InputObject $process -Force -ErrorAction SilentlyContinue
         }
-        Get-CimInstance Win32_UserProfile -Filter "SID='$($user.SID.Value)'" | Remove-CimInstance
+        if (@(Get-SupportUserProcesses $state.ops_user).Count -gt 0) {
+            throw 'Could not stop all support account processes; cleanup will retry.'
+        }
+        if (-not (Remove-SupportProfileWithRetry $Id $user.SID.Value $directory)) { return }
         Remove-LocalUser -SID $user.SID
     }
     Remove-Item -LiteralPath $directory -Recurse -Force

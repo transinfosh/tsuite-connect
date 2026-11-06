@@ -61,6 +61,8 @@ function Unregister-ScheduledTask { param($InputObject, $TaskName, [switch]$Conf
     $script:events.Add('unregister-task')
 }
 function Get-CimInstance { param($ClassName, $Filter) return @() }
+function Get-SupportUserProcesses { param($UserName) return @() }
+function Remove-SupportUserProfile { param($Sid) }
 function Remove-LocalUser { param($SID) $script:events.Add('remove-user') }
 function Remove-Item { param($LiteralPath, [switch]$Recurse, [switch]$Force)
     $script:events.Add('remove-files')
