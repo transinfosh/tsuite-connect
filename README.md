@@ -297,7 +297,8 @@ tsuite-connect close SESSION_ID --force --closed-by alice \
 无需重启。普通操作员不能读写设置；并发保存时旧页面会提示重新加载。修改请求记录在堡垒机
 状态目录的 `policy-audit.jsonl`，实际生效值以当前设置为准。
 此页面功能需同步部署控制台、broker、Edge bridge/manager、前端产物及精确动作授权，详见
-[控制台规格](docs/console/控制台-规格契约.md#ssh-全局闲置设置)。已有线上配置为六小时不代表此新页面已经上线。
+[控制台规格](docs/console/控制台-规格契约.md#ssh-全局闲置设置)。现有服务已部署此功能，见
+[v0.4.2 上线记录](docs/validation/connect-idle-policy-v0.4.2-20261111.md)。
 
 - 客户监控每 15 秒通过独立、绑定会话的 SSH key 请求租约。只有新的实际输入才把期限延长至当前时间加闲置窗口。
 - CLI/broker 只上报终端/标准输入字节；发起一次 `run` 命令也算一次输入。输入会合并上报，正常网络下截止时间有约 30 秒内的采样延迟。
