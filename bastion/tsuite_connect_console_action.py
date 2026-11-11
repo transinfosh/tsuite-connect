@@ -181,6 +181,11 @@ def parser() -> argparse.ArgumentParser:
 	close = subparsers.add_parser("close")
 	close.add_argument("session_id", type=session_id)
 	subparsers.add_parser("list")
+	subparsers.add_parser("policy-show")
+	policy = subparsers.add_parser("policy-set")
+	policy.add_argument("--seconds", type=int, required=True)
+	policy.add_argument("--expected", type=int, required=True)
+	policy.add_argument("--updated-by", required=True)
 	return root
 
 
@@ -196,6 +201,13 @@ def main(arguments: list[str] | None = None) -> int:
 		except ValueError as error:
 			raise ActionError("远程操作格式无效") from error
 	args = parser().parse_args(arguments)
+	if args.action == "policy-show":
+		return run_manager("policy-show")
+	if args.action == "policy-set":
+		if not 300 <= args.seconds <= 28800 or not CREATED_BY_RE.fullmatch(args.updated_by):
+			raise ActionError("闲置设置请求无效")
+		return run_manager("policy-set", "--seconds", str(args.seconds),
+			"--expected", str(args.expected), "--updated-by", args.updated_by)
 	if args.action == "create":
 		request = read_create_request()
 		return run_manager(

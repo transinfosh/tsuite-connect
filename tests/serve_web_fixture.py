@@ -72,11 +72,19 @@ sessions = {
 }
 fail_close = True
 counter = 0
+policy = {"idle_timeout_seconds": 21600, "minimum_seconds": 300, "maximum_seconds": 28800}
 
 
 def manager(*args, **kwargs):
     global fail_close, counter
     action = args[0]
+    if action == "policy-show":
+        return json.dumps(policy)
+    if action == "policy-set":
+        if int(args[4]) != policy["idle_timeout_seconds"]:
+            raise core.ConsoleError("闲置设置已变化，请重新加载后保存", code="policy_conflict", status=core.HTTPStatus.CONFLICT)
+        policy["idle_timeout_seconds"] = int(args[2])
+        return json.dumps(policy)
     if action == "list":
         return "\n".join(
             "\t".join(str(item[key]) for key in ("id", "customer", "status", "remote_port"))
@@ -93,6 +101,7 @@ def manager(*args, **kwargs):
             "customer_command": "echo synthetic-customer-command",
             "operator_claim_token": "synthetic-grant",
             "token": "legacy",
+            "idle_timeout_seconds": policy["idle_timeout_seconds"],
         }
         sessions[item["id"]] = item
         return json.dumps(item)

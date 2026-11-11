@@ -18,7 +18,7 @@ OPERATOR_USER=""
 PORT_START="22000"
 PORT_END="22999"
 TOKEN_TTL_SECONDS="900"
-SESSION_TTL_SECONDS="7200"
+SESSION_TTL_SECONDS="21600"
 WINDOWS_OPENSSH_VERSION="9.8.3.0p2-Preview"
 WINDOWS_OPENSSH_SHA256="0ca131f3a78f404dc819a6336606caec0db1663a692ccc3af1e90232706ada54"
 WINDOWS_OPENSSH_URL="https://github.com/PowerShell/Win32-OpenSSH/releases/download/v9.8.3.0p2-Preview/OpenSSH-Win64.zip"
@@ -41,7 +41,7 @@ usage() {
   --bastion-port PORT          堡垒机 SSH 端口，默认 22
   --port-range START-END       反向 SSH 回环端口范围，默认 22000-22999
   --token-ttl SECONDS          接入链接有效期，默认 900
-  --session-ttl SECONDS        会话闲置超时，默认 7200
+  --session-ttl SECONDS        会话闲置超时，默认 21600
   --windows-openssh-package FILE
                               可选，本地 Win64 OpenSSH 兼容包；未指定时下载固定版本
 EOF
@@ -257,6 +257,8 @@ $OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --con
 $OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json show *
 $OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json set-platform *
 $OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json list
+$OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json policy-show
+$OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json policy-set *
 $OPERATOR_USER ALL=(root) NOPASSWD: /usr/local/sbin/tsuite-support-session --config $CONFIG_DIR/config.json close *
 EOF
 chmod 0440 /etc/sudoers.d/tsuite-support-session

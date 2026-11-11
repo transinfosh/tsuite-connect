@@ -208,6 +208,20 @@ class WebApplication:
             return self.json(
                 respond, {"ok": True}, headers=[self.cookie("tsuite_connect_session", "", age=0)]
             )
+        if path == "/api/settings" and method in {"GET", "POST"}:
+            if not session["is_admin"]:
+                raise core.ConsoleError("只有管理员可以管理系统设置。", status=HTTPStatus.FORBIDDEN)
+            if method == "GET":
+                return self.json(respond, json.loads(core.manager("policy-show")))
+            seconds, expected = form.get("idle_timeout_seconds", ""), form.get("expected_seconds", "")
+            if not re.fullmatch(r"[0-9]{1,5}", seconds) or not 300 <= int(seconds) <= 28800:
+                raise core.ConsoleError("闲置超时必须为 5–480 分钟的整数秒数。")
+            if not re.fullmatch(r"[0-9]{1,5}", expected) or not 300 <= int(expected) <= 28800:
+                raise core.ConsoleError("请重新加载系统设置后保存。")
+            return self.json(respond, json.loads(core.manager(
+                "policy-set", "--seconds", str(int(seconds)), "--expected", str(int(expected)),
+                "--updated-by", str(session["login"]),
+            )))
         if path == "/api/sessions" and method == "GET":
             sessions = []
             for line in core.manager("list").splitlines():
@@ -386,7 +400,7 @@ class WebApplication:
             )
             return [body]
         if method == "GET" and (
-            path in {"/", "/users", "/invite", "/login/local/totp"}
+            path in {"/", "/users", "/settings", "/invite", "/login/local/totp"}
             or re.fullmatch(r"/session/[0-9a-f]{12}", path)
         ):
             index = self.static_root / "index.html"

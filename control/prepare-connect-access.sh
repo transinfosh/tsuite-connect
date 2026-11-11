@@ -162,7 +162,7 @@ fi
 sudoers_temporary="$(mktemp /etc/sudoers.d/.tsuite-deploy-operator.XXXXXX)"
 trap 'unlink "$sudoers_temporary" 2>/dev/null || true' EXIT
 cat >"$sudoers_temporary" <<EOF
-Cmnd_Alias TSUITE_SUPPORT_WEB = /usr/local/bin/tsuite-connect-console-action create *, /usr/local/bin/tsuite-connect-console-action set-platform *, /usr/local/bin/tsuite-connect-console-action show *, /usr/local/bin/tsuite-connect-console-action list, /usr/local/bin/tsuite-connect-console-action close *, /usr/local/bin/tsuite-connect-console-action claim
+Cmnd_Alias TSUITE_SUPPORT_WEB = /usr/local/bin/tsuite-connect-console-action create *, /usr/local/bin/tsuite-connect-console-action set-platform *, /usr/local/bin/tsuite-connect-console-action show *, /usr/local/bin/tsuite-connect-console-action list, /usr/local/bin/tsuite-connect-console-action close *, /usr/local/bin/tsuite-connect-console-action claim, /usr/local/bin/tsuite-connect-console-action policy-show, /usr/local/bin/tsuite-connect-console-action policy-set *
 Cmnd_Alias TSUITE_SUPPORT_OPERATOR = /usr/local/bin/tsuite-connect-console-action show *, /usr/local/bin/tsuite-connect-console-action list, /usr/local/bin/tsuite-connect-console-action close *, /usr/local/bin/tsuite-connect-console-action force-close *, /usr/local/bin/tsuite-connect-console-action ssh *, /usr/local/bin/tsuite-connect-console-action run *
 Cmnd_Alias TSUITE_CONTROL_SERVICES = $control_services
 $CONSOLE_USER ALL=($BROKER_USER) NOPASSWD: TSUITE_SUPPORT_WEB

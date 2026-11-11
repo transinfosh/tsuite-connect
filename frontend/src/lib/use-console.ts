@@ -11,6 +11,7 @@ import type {
   Platform,
   PlatformField,
   Session,
+  SessionPolicy,
 } from './types'
 
 const currentPath = () => location.pathname.replace(/^\/connect/, '') || '/'
@@ -25,6 +26,7 @@ export function useConsole() {
   const [loading, setLoading] = useState(false)
   const [sessions, setSessions] = useState<Session[]>([])
   const [users, setUsers] = useState<Account[]>([])
+  const [policy, setPolicy] = useState<SessionPolicy | null>(null)
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
   const [usersLoaded, setUsersLoaded] = useState(false)
   const [path, setPath] = useState(currentPath)
@@ -59,9 +61,11 @@ export function useConsole() {
           ? 'commands'
           : path === '/users'
             ? 'users'
-            : path.startsWith('/session/')
-              ? 'detail'
-              : 'dashboard'
+            : path === '/settings'
+              ? 'settings'
+              : path.startsWith('/session/')
+                ? 'detail'
+                : 'dashboard'
 
   const request = useCallback(
     async <T>(endpoint: string, data?: Record<string, unknown>) => {
@@ -78,6 +82,7 @@ export function useConsole() {
           setSelected(null)
           setSessions([])
           setUsers([])
+          setPolicy(null)
           setInviteUrl('')
           setNewOpen(false)
           setCloseTarget(null)
@@ -134,6 +139,9 @@ export function useConsole() {
         if (path === '/invite') {
           const value = await request<Invite>(`/api/invite?${new URLSearchParams({ token })}`)
           if (current()) setInvite(value)
+        } else if (path === '/settings') {
+          const value = await request<SessionPolicy>('/api/settings')
+          if (current()) setPolicy(value)
         } else if (path === '/users') {
           const value = await request<{ users: Account[] }>('/api/users')
           if (current()) {
@@ -254,6 +262,7 @@ export function useConsole() {
         setCommands(null)
         setSessions([])
         setUsers([])
+        setPolicy(null)
         setInviteUrl('')
         setSelected(null)
         setAuthStep('password')
@@ -355,6 +364,16 @@ export function useConsole() {
       setInviteUrl((await request<{ invite_url: string }>('/api/users/invite', data)).invite_url),
     )
   }
+  async function savePolicy(seconds: number) {
+    if (!policy) return false
+    return perform(async () => {
+      const value = await request<SessionPolicy>('/api/settings', {
+        idle_timeout_seconds: seconds,
+        expected_seconds: policy.idle_timeout_seconds,
+      })
+      setPolicy(value)
+    })
+  }
   async function userAction(account: Account, action: string) {
     return perform(async () => {
       const result = await request<{ invite_url?: string }>(
@@ -377,6 +396,8 @@ export function useConsole() {
     setError,
     sessions,
     users,
+    policy,
+    savePolicy,
     sessionsLoaded,
     usersLoaded,
     selected,

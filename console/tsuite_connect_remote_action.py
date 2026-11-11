@@ -594,6 +594,11 @@ def parser() -> argparse.ArgumentParser:
 	run_parser.add_argument("session_id", type=validate_session_id)
 	run_parser.add_argument("remote_command", nargs=argparse.REMAINDER)
 	subparsers.add_parser("list")
+	subparsers.add_parser("policy-show")
+	policy = subparsers.add_parser("policy-set")
+	policy.add_argument("--seconds", type=int, required=True)
+	policy.add_argument("--expected", type=int, required=True)
+	policy.add_argument("--updated-by", type=validate_created_by, required=True)
 	subparsers.add_parser("gc")
 	subparsers.add_parser("self-test")
 	subparsers.add_parser("claim")
@@ -603,6 +608,15 @@ def parser() -> argparse.ArgumentParser:
 def main() -> int:
 	args = parser().parse_args()
 	settings = Settings.load()
+	if args.action in {"policy-show", "policy-set"}:
+		arguments = ["policy-show"]
+		if args.action == "policy-set":
+			if not 300 <= args.seconds <= 28800:
+				raise RemoteActionError("闲置超时必须为 300–28800 秒的整数")
+			arguments = ["policy-set", "--seconds", str(args.seconds),
+				"--expected", str(args.expected), "--updated-by", args.updated_by]
+		sys.stdout.write(ensure_success(remote_action(settings, *arguments), "无法更新闲置设置"))
+		return 0
 	if args.action == "claim":
 		body = sys.stdin.buffer.read(8193)
 		if len(body) > 8192:

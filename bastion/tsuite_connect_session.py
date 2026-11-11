@@ -145,7 +145,7 @@ class Settings:
 			port_start=int(value.get("port_start", 22000)),
 			port_end=int(value.get("port_end", 22999)),
 			token_ttl_seconds=int(value.get("token_ttl_seconds", 900)),
-			session_ttl_seconds=int(value.get("session_ttl_seconds", 7200)),
+			session_ttl_seconds=int(value.get("session_ttl_seconds", 21600)),
 			tunnel_group=value.get("tunnel_group", "tsuite-tunnel"),
 			windows_openssh_url=value.get("windows_openssh_url", ""),
 			windows_openssh_sha256=value.get("windows_openssh_sha256", ""),
@@ -228,6 +228,53 @@ class SessionStore:
 				if secrets.compare_digest(token_digest, supplied_hash):
 					return session
 		return None
+
+
+def session_policy(config_path: pathlib.Path, store: SessionStore, *, seconds: int | None = None,
+	expected: int | None = None, updated_by: str = "") -> dict[str, int]:
+	"""Expose only the idle policy, keeping all other root-managed settings private."""
+	if seconds is not None:
+		if type(seconds) is not int or not 300 <= seconds <= 28800:
+			raise SupportError("闲置超时必须为 300–28800 秒的整数")
+		updated_by = validate_created_by(updated_by)
+	with store.locked():
+		current = Settings.load(config_path)
+		current.validate()
+		if seconds is not None and seconds != current.session_ttl_seconds:
+			if expected != current.session_ttl_seconds:
+				raise SupportError("闲置设置已变化，请重新加载后保存")
+			value = read_json(config_path)
+			value["session_ttl_seconds"] = seconds
+			metadata = config_path.stat()
+			fd, name = tempfile.mkstemp(prefix=".session-policy-", dir=config_path.parent)
+			try:
+				with os.fdopen(fd, "w", encoding="utf-8") as handle:
+					os.fchmod(handle.fileno(), metadata.st_mode & 0o777)
+					os.fchown(handle.fileno(), metadata.st_uid, metadata.st_gid)
+					json.dump(value, handle, ensure_ascii=False, indent=2)
+					handle.write("\n")
+					handle.flush()
+					os.fsync(handle.fileno())
+				# Persist the attempted change before replacing the configuration.
+				audit = {"updated_at": int(time.time()), "updated_by": updated_by,
+					"before_seconds": current.session_ttl_seconds, "requested_seconds": seconds}
+				audit_fd = os.open(store.settings.state_dir / "policy-audit.jsonl",
+					os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+				with os.fdopen(audit_fd, "a", encoding="utf-8") as log:
+					log.write(json.dumps(audit) + "\n")
+					log.flush()
+					os.fsync(log.fileno())
+				os.replace(name, config_path)
+				directory = os.open(config_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+				try:
+					os.fsync(directory)
+				finally:
+					os.close(directory)
+			finally:
+				with contextlib.suppress(FileNotFoundError):
+					os.unlink(name)
+		return {"idle_timeout_seconds": Settings.load(config_path).session_ttl_seconds,
+			"minimum_seconds": 300, "maximum_seconds": 28800}
 
 
 def port_available(host: str, port: int) -> bool:
@@ -851,6 +898,11 @@ def build_parser() -> argparse.ArgumentParser:
 	set_platform.add_argument("platform", choices=("linux", "windows"))
 	set_platform.add_argument("--json", action="store_true")
 	subparsers.add_parser("list")
+	subparsers.add_parser("policy-show")
+	policy = subparsers.add_parser("policy-set")
+	policy.add_argument("--seconds", type=int, required=True)
+	policy.add_argument("--expected", type=int, required=True)
+	policy.add_argument("--updated-by", required=True)
 	close = subparsers.add_parser("close")
 	close.add_argument("session_id")
 	close.add_argument("--closed-by", required=True)
@@ -870,6 +922,11 @@ def main() -> int:
 	settings.validate()
 	store = SessionStore(settings)
 	try:
+		if args.command in {"policy-show", "policy-set"}:
+			kwargs = {"seconds": args.seconds, "expected": args.expected,
+				"updated_by": args.updated_by} if args.command == "policy-set" else {}
+			print(json.dumps(session_policy(pathlib.Path(args.config), store, **kwargs)))
+			return 0
 		if args.command == "create":
 			session, token = create_session(
 				store,

@@ -1,5 +1,10 @@
 export type Platform = 'linux' | 'windows'
 export type PlatformField = 'platform' | 'operator_platform'
+export interface SessionPolicy {
+  idle_timeout_seconds: number
+  minimum_seconds: number
+  maximum_seconds: number
+}
 export interface User {
   login: string
   name: string

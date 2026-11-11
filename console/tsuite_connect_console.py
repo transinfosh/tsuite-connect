@@ -512,6 +512,7 @@ def manager(*arguments: str, input_text: str | None = None) -> str:
 		# Only known categories cross the broker boundary: stderr can contain credentials.
 		detail = result.stderr or ""
 		categories = (
+			("闲置设置已变化", "闲置设置已被其他管理员修改，请重新加载后保存。", "policy_conflict"),
 			("客户侧清理未确认", "客户侧清理未确认，连接尚未撤销。请确认客户在线并重试；仍失败时联系运维核查。", "cleanup_unconfirmed"),
 			("客户隧道当前不可达", "客户隧道不可达。请检查客户网络、SSH 服务及接入程序后重试。", "tunnel_unreachable"),
 			("Connection refused", "SSH 连接被拒绝，请检查客户隧道和 SSH 服务是否仍在线。", "ssh_refused"),

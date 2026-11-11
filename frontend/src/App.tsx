@@ -1,4 +1,4 @@
-import { ChevronDown, Link2, LoaderCircle, LogOut, Monitor, UsersRound } from 'lucide-react'
+import { ChevronDown, Link2, LoaderCircle, LogOut, Monitor, UsersRound, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -20,6 +20,7 @@ import { Auth } from '@/components/auth'
 import { Sessions } from '@/components/sessions'
 import { CommandsView, Detail } from '@/components/details'
 import { Users } from '@/components/users'
+import { SystemSettings } from '@/components/settings'
 import { SessionDialogs } from '@/components/session-dialogs'
 import { ErrorNotice } from '@/components/shared'
 
@@ -69,13 +70,22 @@ export default function App() {
                     {[
                       { to: '/', label: '远程会话', icon: Monitor },
                       ...(m.user?.is_admin
-                        ? [{ to: '/users', label: '用户管理', icon: UsersRound }]
+                        ? [
+                            { to: '/users', label: '用户管理', icon: UsersRound },
+                            { to: '/settings', label: '系统设置', icon: Settings },
+                          ]
                         : []),
                     ].map((item) => (
                       <NavigationMenuItem key={item.to}>
                         <NavigationMenuLink
                           asChild
-                          active={item.to === '/users' ? m.view === 'users' : m.view !== 'users'}
+                          active={
+                            item.to === '/users'
+                              ? m.view === 'users'
+                              : item.to === '/settings'
+                                ? m.view === 'settings'
+                                : !['users', 'settings'].includes(m.view)
+                          }
                         >
                           <a
                             className="flex-row items-center gap-2 whitespace-nowrap"
@@ -140,6 +150,8 @@ export default function App() {
                   <CommandsView model={m} />
                 ) : m.view === 'users' ? (
                   <Users model={m} />
+                ) : m.view === 'settings' ? (
+                  <SystemSettings model={m} />
                 ) : (
                   <Detail model={m} />
                 )}

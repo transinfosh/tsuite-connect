@@ -45,6 +45,12 @@ Linux 上的 PowerShell 验证不能替代 Windows ACL 验证。
 通过 stdin 执行 SSH 维护脚本时，脚本内 broker/SSH 自检命令应加 `</dev/null`，避免吞掉后续脚本。
 更新后核验文件摘要、权限、systemd 服务、HTTPS 入口；失败时恢复备份程序和配置并重新核验。
 
+SSH 全局闲置设置页面需要同步部署控制台 Web 模块、broker、前端产物和 Edge bridge/manager。
+两端精确 sudoers 分别增加 `policy-show` 与 `policy-set` 动作；沿用同一受限执行文件和固定配置路径，
+不授权 Shell 或通用配置编辑。仅更新页面会导致读取失败，不得回退到静态六小时假装读取成功。
+配置原地保留；已有会话不迁移。管理员页面保存后重新读取核对，状态目录的
+`policy-audit.jsonl` 只证明请求曾被尝试，配置值才代表实际生效结果。
+
 ## 版本发布
 
 VERSION 为 `X.Y.Z`；验证通过后提交、创建同版本不可移动 tag `vX.Y.Z`。
